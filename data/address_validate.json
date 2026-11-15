@@ -1,0 +1,22 @@
+{
+  "base": {
+    "address": "Level 1, 123 Collins Street",
+    "address2": "Melbourne",
+    "country": "Australia",
+    "is_return": false,
+    "order_id": "ORD-ADDR-0001",
+    "postcode": "3000",
+    "state": "VIC",
+    "suburb": "Melbourne"
+  },
+  "states": [
+    { "state": "NSW", "postcode": "2000", "suburb": "Sydney" },
+    { "state": "VIC", "postcode": "3000", "suburb": "Melbourne" },
+    { "state": "QLD", "postcode": "4000", "suburb": "Brisbane" },
+    { "state": "SA", "postcode": "5000", "suburb": "Adelaide" },
+    { "state": "WA", "postcode": "6000", "suburb": "Perth" },
+    { "state": "TAS", "postcode": "7000", "suburb": "Hobart" },
+    { "state": "ACT", "postcode": "2600", "suburb": "Canberra" },
+    { "state": "NT", "postcode": "0800", "suburb": "Darwin" }
+  ]
+}
