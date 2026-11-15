@@ -1,3 +1,5 @@
+# REQ-001 | TC-ADDR-001 | AC-01 | API v1.0.0
+
 """API tests for POST /address/validate (module 06_地址校验).
 
 Case IDs map to D:\\AI\\测试用例\\06_地址校验\\测试用例.md.
