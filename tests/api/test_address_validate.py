@@ -1,16 +1,66 @@
+
 # REQ-001 | TC-ADDR-001 | AC-01 | API v1.0.0
+import pytest
+import requests
+
+# 1. 引入配置读取器和日志工具
+from utils.config_reader import load_config
+from utils.logger import get_logger
+
+# 2. 初始化配置和日志
+config = load_config("base_url.yaml")
+logger = get_logger(__name__)
+
+# 3. 提取基础URL
+BASE_URL = config["base_url"]
+
+# 检查 CI 环境，如果是 CI 则跳过（对应我们之前的逻辑）
+ci_skipif = pytest.mark.skipif(
+    pytest.importorskip("os").getenv("CI", "false") == "true",
+    reason="CI环境下跳过真实接口调用"
+)
+
+@pytest.fixture(scope="session")
+def address_api_session():
+    # 创建一个全局的 Session，自动复用 HTTP 连接
+    session = requests.Session()
+    session.headers.update({
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    })
+    logger.info(f"全局 HTTP Session 初始化完成，目标服务器: {BASE_URL}")
+    yield session
+    session.close()
+    logger.info("全局 HTTP Session 已关闭")
 
 """API tests for POST /address/validate (module 06_地址校验).
 
-Case IDs map to D:\\AI\\测试用例\\06_地址校验\\测试用例.md.
+Case IDs map to 06_地址校验/测试用例.md.
 Every expectation is read from config/env.yaml -> address_validation, so the
 code table can change without touching this file.
+
+环境区分说明（方法2 / 区分环境）：
+本文件是"契约测试"，所有断言都依赖真实接口返回的结构与业务值（有效地址
+success=true、PO Box 识别、邮编/州不匹配处理等），无法用固定假数据代替。
+在无法访问内网测试服务的环境（GitHub Actions 会注入环境变量 CI=true）中，
+真实请求必然 ConnectTimeout，因此整模块自动跳过；本地开发环境（无 CI 变量）
+照常执行真实用例。若将来要让 CI 也校验逻辑，应改为录制/回放真实响应或引入
+契约测试（如 Pact），而不是逐函数 mock。
 """
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+
+# 仅在本地（能访问内网地址服务）执行真实接口契约测试；CI 环境自动跳过。
+_RUN_REAL_API = os.getenv('CI', '').strip().lower() not in ('true', '1', 'yes')
+
+pytestmark = pytest.mark.skipif(
+    not _RUN_REAL_API,
+    reason='CI 环境无法访问内网地址服务，跳过真实接口契约测试（本地照常执行）',
+)
 
 ENVELOPE_FIELDS = {"code", "msg", "success", "data", "hasMore", "tc", "tp"}
 DATA_FIELDS = {
