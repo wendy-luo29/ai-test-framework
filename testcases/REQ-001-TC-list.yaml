@@ -1,0 +1,4 @@
+用例清单:
+  - id: TC-ADDR-001 | AC: AC-01 | 正常地址校验通过 | P0
+  - id: TC-ADDR-002 | AC: AC-02 | 空地址拦截 | P0
+  - id: TC-ADDR-003 | AC: AC-03 | 国家编码不支持拦截 | P1
