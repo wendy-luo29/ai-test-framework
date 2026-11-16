@@ -124,13 +124,12 @@ def config():
 
 @pytest.fixture(scope="session")
 def ui_base_url(config, local_server):
-    return config.get("ui_base_url") or local_server
+    return config.get("ui_base_url") 
 
 
 @pytest.fixture(scope="session")
 def api_base_url(config, local_server):
-    return config.get("api_base_url") or local_server
-
+    return config.get("api_base_url")
 
 @pytest.fixture(scope="session")
 def browser_context_args(browser_context_args, ui_base_url):

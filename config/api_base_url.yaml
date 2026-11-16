@@ -1,5 +1,5 @@
 # 全局测试环境配置
-base_url: "http://192.168.1.162:11000"
+api_base_url: "http://192.168.1.71:13109"
 
 # 后续如果加了接口，也可以在这里定义前缀
-api_prefix: "/api/v2"
+#api_prefix: "/api/v1"

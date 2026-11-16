@@ -8,11 +8,11 @@ from utils.config_reader import load_config
 from utils.logger import get_logger
 
 # 2. 初始化配置和日志
-config = load_config("base_url.yaml")
+config = load_config("api_base_url.yaml")
 logger = get_logger(__name__)
 
 # 3. 提取基础URL
-BASE_URL = config["base_url"]
+BASE_URL = config["api_base_url"]
 
 # 检查 CI 环境，如果是 CI 则跳过（对应我们之前的逻辑）
 ci_skipif = pytest.mark.skipif(
@@ -28,7 +28,7 @@ def address_api_session():
         "Content-Type": "application/json",
         "Accept": "application/json"
     })
-    logger.info(f"全局 HTTP Session 初始化完成，目标服务器: {BASE_URL}")
+    logger.info(f"全局 HTTP Session 初始化完成，目标服务器: {api_base_url}")
     yield session
     session.close()
     logger.info("全局 HTTP Session 已关闭")
