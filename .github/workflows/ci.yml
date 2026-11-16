@@ -5,12 +5,11 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
-  workflow_dispatch:  
+  workflow_dispatch: # 这里保留了你刚加的手动触发
 
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,5 +22,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # 新增步骤：启动一个假的本地服务器供测试使用
+      - name: Start local mock server
+        run: |
+          python -m http.server 8000 &
+          sleep 2
+
+      # 修改步骤：运行测试，并把本地 IP 通过环境变量传给 Python
       - name: Run tests
+        env:
+          CI_API_URL: "http://127.0.0.1:8000" # 告诉测试代码用本地回环地址
         run: pytest tests/ -v
