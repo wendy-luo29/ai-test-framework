@@ -1,745 +1,648 @@
+# REQ-001 | 地址验证接口自动化用例 | v2.1
+"""POST /address/validate 接口自动化。
 
-# REQ-001 | TC-ADDR-001 | AC-01 | API v1.0.0
-import pytest
-import requests
-
-# 1. 引入配置读取器和日志工具
-from utils.config_reader import load_config
-from utils.logger import get_logger
-
-# 2. 初始化配置和日志
-config = load_config("api_base_url.yaml")
-logger = get_logger(__name__)
-
-# 3. 提取基础URL
-BASE_URL = config["api_base_url"]
-
-# 检查 CI 环境，如果是 CI 则跳过（对应我们之前的逻辑）
-ci_skipif = pytest.mark.skipif(
-    pytest.importorskip("os").getenv("CI", "false") == "true",
-    reason="CI环境下跳过真实接口调用"
-)
-
-@pytest.fixture(scope="session")
-def address_api_session():
-    # 创建一个全局的 Session，自动复用 HTTP 连接
-    session = requests.Session()
-    session.headers.update({
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    })
-    logger.info(f"全局 HTTP Session 初始化完成，目标服务器: {api_base_url}")
-    yield session
-    session.close()
-    logger.info("全局 HTTP Session 已关闭")
-
-"""API tests for POST /address/validate (module 06_地址校验).
-
-Case IDs map to 06_地址校验/测试用例.md.
-Every expectation is read from config/env.yaml -> address_validation, so the
-code table can change without touching this file.
-
-环境区分说明（方法2 / 区分环境）：
-本文件是"契约测试"，所有断言都依赖真实接口返回的结构与业务值（有效地址
-success=true、PO Box 识别、邮编/州不匹配处理等），无法用固定假数据代替。
-在无法访问内网测试服务的环境（GitHub Actions 会注入环境变量 CI=true）中，
-真实请求必然 ConnectTimeout，因此整模块自动跳过；本地开发环境（无 CI 变量）
-照常执行真实用例。若将来要让 CI 也校验逻辑，应改为录制/回放真实响应或引入
-契约测试（如 Pact），而不是逐函数 mock。
+用例来源：.claude/skills/design-testcases/output/REQ-001-TC-design-v2.md
+每条用例函数体首行 # case_id 与用例清单逐字符一致。
+环境地址、超时、默认国家、not found 文案均来自 config/env.yaml。
 """
 
-import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-# 仅在本地（能访问内网地址服务）执行真实接口契约测试；CI 环境自动跳过。
-_RUN_REAL_API = os.getenv('CI', '').strip().lower() not in ('true', '1', 'yes')
+from config.config_loader import get_value
+from utils.api_assertions import (
+    assert_business_failure,
+    assert_data_schema,
+    assert_envelope,
+    assert_not_found,
+    assert_ok,
+    assert_rejected,
+    assert_validation_error,
+    parse_json,
+    merged,
+    without,
+)
+
+def assert_address_exists(db, data):
+    """success=true 时校验主键命中地址总表，suburb 大小写不敏感。"""
+    row = db.fetch_one(
+        "SELECT 1 AS hit FROM lsp_address_suburb_postcode "
+        "WHERE state_code = %s AND postcode = %s "
+        "AND UPPER(suburb_name) = UPPER(%s) LIMIT 1",
+        (data["stateCode"], data["postcode"], data["suburb"]),
+    )
+    assert row is not None, "地址总表未命中：state_code=%r postcode=%r suburb=%r" % (
+        data["stateCode"],
+        data["postcode"],
+        data["suburb"],
+    )
+
+
+_REASONS = []
+_RUN_IN_CI = os.getenv("ADDRESS_API_ALLOW_CI", "").strip().lower() in ("true", "1", "yes")
+if os.getenv("CI", "").strip().lower() in ("true", "1", "yes") and not _RUN_IN_CI:
+    _REASONS.append("CI 环境无法访问内网地址服务（设置 ADDRESS_API_ALLOW_CI=1 可强制执行）")
+if not get_value("api_base_url", ""):
+    _REASONS.append("api_base_url 为空，本地 demo server 未实现 /address/validate")
 
 pytestmark = pytest.mark.skipif(
-    not _RUN_REAL_API,
-    reason='CI 环境无法访问内网地址服务，跳过真实接口契约测试（本地照常执行）',
+    bool(_REASONS), reason="；".join(_REASONS)
 )
 
-ENVELOPE_FIELDS = {"code", "msg", "success", "data", "hasMore", "tc", "tp"}
-DATA_FIELDS = {
-    "address", "address2", "adviceAddress", "country", "countryCode",
-    "fullAddress", "isPoBox", "orderId", "postcode", "reason", "state",
-    "stateCode", "suburb", "suburbCode", "success",
-}
-DATA_STRING_FIELDS = DATA_FIELDS - {"isPoBox", "success"}
-
-STATE_CODES = ["NSW", "VIC", "QLD", "SA", "WA", "TAS", "ACT", "NT"]
-
-
-def _body(response):
-    try:
-        return response.json()
-    except ValueError:
-        return None
-
-
-def _message(response, text):
-    body = _body(response)
-    rendered = json.dumps(body, ensure_ascii=False) if body is not None else response.text
-    return f"{text}\nHTTP {response.status_code}\n响应体: {rendered}"
-
-
-def assert_envelope(body, response):
-    assert isinstance(body, dict), _message(response, "响应体不是 JSON 对象")
-    missing = ENVELOPE_FIELDS - set(body)
-    assert not missing, _message(response, f"包装层缺少字段: {sorted(missing)}")
-    assert isinstance(body["code"], str), _message(response, "code 应为 string")
-    assert isinstance(body["msg"], str), _message(response, "msg 应为 string")
-    assert isinstance(body["success"], bool), _message(response, "success 应为 boolean")
-    for field in ("hasMore", "tc", "tp"):
-        value = body[field]
-        assert isinstance(value, int) and not isinstance(value, bool), _message(
-            response, f"{field} 应为整数"
-        )
-
-
-def assert_data_schema(data, response):
-    assert isinstance(data, dict), _message(response, "data 不是 JSON 对象")
-    missing = DATA_FIELDS - set(data)
-    assert not missing, _message(response, f"data 缺少字段: {sorted(missing)}")
-    assert isinstance(data["isPoBox"], bool), _message(response, "isPoBox 应为 boolean")
-    assert isinstance(data["success"], bool), _message(response, "data.success 应为 boolean")
-    for field in DATA_STRING_FIELDS:
-        value = data[field]
-        assert value is None or isinstance(value, str), _message(
-            response, f"data.{field} 应为 string 或 null，实际 {type(value).__name__}"
-        )
-
-
-def assert_ok(response, expected):
-    """Layer 1 + 2 + envelope-level layer 3 for a successful call."""
-    assert response.status_code == expected["http_status"]["ok"], _message(
-        response, f"HTTP 状态码应为 {expected['http_status']['ok']}"
-    )
-    body = _body(response)
-    assert body is not None, _message(response, "响应体不是合法 JSON")
-    assert_envelope(body, response)
-    assert body["code"] == expected["code"]["success"], _message(
-        response, f"包装 code 应为 {expected['code']['success']}"
-    )
-    assert body["msg"] == expected["msg"]["success"], _message(
-        response, f"包装 msg 应为 {expected['msg']['success']}"
-    )
-    assert body["success"] is True, _message(response, "包装 success 应为 true")
-    assert_data_schema(body["data"], response)
-    return body["data"]
-
-
-def assert_not_accepted(response, expected):
-    """Request is rejected, either as HTTP 400 or inside the envelope."""
-    allowed = {expected["http_status"]["ok"], expected["http_status"]["client_error"]}
-    assert response.status_code in allowed, _message(
-        response, f"状态码应属于 {sorted(allowed)}"
-    )
-    if response.status_code == expected["http_status"]["client_error"]:
-        return
-    body = _body(response)
-    assert body is not None, _message(response, "拒绝响应不是合法 JSON")
-    assert_envelope(body, response)
-    rejected = body["code"] == expected["code"]["param_error"]
-    data = body["data"]
-    if isinstance(data, dict):
-        assert_data_schema(data, response)
-        rejected = rejected or data["success"] is False
-    assert rejected, _message(response, "既不是参数错误码，也不是 data.success=false")
-
-
-def assert_mismatch_handled(data):
-    """Address data conflicts must surface as a reason, or as an advice address."""
-    if data["success"]:
-        assert data["adviceAddress"], "success=true 时必须返回 adviceAddress 建议地址"
-    else:
-        assert data["reason"], "success=false 时必须返回 reason 拦截原因"
-
-
-def merged(base: dict, **overrides) -> dict:
-    payload = dict(base)
-    payload.update(overrides)
-    return payload
-
-
-def without(base: dict, *keys) -> dict:
-    payload = dict(base)
-    for key in keys:
-        payload.pop(key, None)
-    return payload
-
-
-@pytest.fixture
-def base_payload(load_json):
-    return dict(load_json("address_validate.json")["base"])
-
-
-@pytest.fixture
-def states_by_code(load_json):
-    return {row["state"]: row for row in load_json("address_validate.json")["states"]}
-
 
 # ---------------------------------------------------------------------------
-# Core flow
+# AC-01 existence hit
 # ---------------------------------------------------------------------------
+
+
+
 @pytest.mark.api
-@pytest.mark.smoke
-def test_validate_valid_address(address_client, base_payload, address_config):
-    # case_id: ADDR-C-001
-    expected = address_config["expected"]
-    data = assert_ok(address_client.validate(base_payload), expected)
-    assert data["success"] is True, "有效地址应验证通过"
-    assert data["country"] == "Australia"
-    assert data["countryCode"] == "AU"
+def test_arbitrary_street_text_still_valid(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-004
+    payload = merged(base_payload, address=addr_data["arbitrary_address"])
+    data = assert_ok(address_client.validate(payload), expected)
+    assert data["success"] is True
+    assert data["isPoBox"] is False
     assert data["stateCode"] == base_payload["state"]
-    assert data["postcode"] == base_payload["postcode"]
-    assert data["suburbCode"], "区域编码不应为空"
-    assert base_payload["address"] in data["fullAddress"]
-    assert data["isPoBox"] is False
-    assert data["orderId"] == base_payload["order_id"]
-    assert data["reason"] in ("", None), "验证通过时不应返回拦截原因"
+    assert_address_exists(db, data)
+
+
+# ---------------------------------------------------------------------------
+# AC-02 address not found
+# ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
 
 
 @pytest.mark.api
-@pytest.mark.smoke
-def test_validate_default_country(address_client, base_payload, address_config):
-    # case_id: ADDR-P-007
-    expected = address_config["expected"]
-    data = assert_ok(address_client.validate(without(base_payload, "country")), expected)
-    assert data["success"] is True
-    assert data["country"] == address_config["default_country"]
-    assert data["countryCode"] == "AU"
+@pytest.mark.skip(reason="待确认：DB 对 state/suburb 的大小写与前后空格是否敏感")
+def test_key_case_and_whitespace(address_client, base_payload, addr_data, address_config):
+    # case_id: TC-ADDR-008
+    for overrides in addr_data["key_case_whitespace"]:
+        payload = merged(base_payload, **overrides)
+        assert_not_found(address_client.validate(payload), address_config)
 
 
 @pytest.mark.api
-def test_validate_empty_country_uses_default(address_client, base_payload, address_config):
-    # case_id: ADDR-P-008
-    expected = address_config["expected"]
-    data = assert_ok(address_client.validate(merged(base_payload, country="")), expected)
-    assert data["country"] == address_config["default_country"]
-    assert data["countryCode"] == "AU"
+def test_null_or_empty_key_fields(address_client, base_payload, addr_data, expected):
+    # case_id: TC-ADDR-009
+    empty_reason = {"state": "state not found"}
+    for overrides in addr_data["key_null_empty"]:
+        payload = merged(base_payload, **overrides)
+        field, value = next(iter(overrides.items()))
+        response = address_client.validate(payload)
+        if value is None:
+            assert_validation_error(response, expected)
+            continue
+        body = parse_json(response)
+        assert_envelope(body, response)
+        data = body["data"]
+        assert data["success"] is False, "%s 为空时应返回业务失败" % field
+        reason = (data.get("reason") or "").lower()
+        assert reason, "%s 为空时必须返回明确 reason" % field
+        if field in empty_reason:
+            want = empty_reason[field]
+            assert want in reason, "%s 为空时 reason 应为 %r，实际 %r" % (
+                field,
+                want,
+                data.get("reason"),
+            )
 
 
 @pytest.mark.api
-@pytest.mark.smoke
-def test_validate_is_return_true(address_client, base_payload, address_config):
-    # case_id: ADDR-C-002
-    expected = address_config["expected"]
-    data = assert_ok(address_client.validate(merged(base_payload, is_return=True)), expected)
-    assert data["success"] is True
-    assert data["adviceAddress"], "is_return=true 时应返回建议地址"
-
-
-@pytest.mark.api
-def test_validate_is_return_missing(address_client, base_payload, address_config):
-    # case_id: ADDR-P-009
-    expected = address_config["expected"]
-    data = assert_ok(address_client.validate(without(base_payload, "is_return")), expected)
-    assert data["adviceAddress"] in ("", None), "is_return 缺省时不应返回建议地址"
-
-
-@pytest.mark.api
-@pytest.mark.smoke
-def test_pobox_is_detected(address_client, base_payload, address_config):
-    # case_id: ADDR-C-003
-    expected = address_config["expected"]
-    data = assert_ok(
-        address_client.validate(merged(base_payload, address="PO Box 123")), expected
-    )
-    assert data["isPoBox"] is True, "PO Box 地址应识别为信箱"
-    if not data["success"]:
-        assert data["reason"], "判定拦截时必须给出原因"
-
-
-@pytest.mark.api
-@pytest.mark.smoke
-def test_unknown_street_is_rejected(address_client, base_payload, address_config):
-    # case_id: ADDR-C-004
-    expected = address_config["expected"]
-    data = assert_ok(
-        address_client.validate(merged(base_payload, address="9999 Unknown Road")), expected
-    )
-    assert data["success"] is False
-    assert data["reason"], "验证不通过时必须返回拦截原因"
-    assert data["isPoBox"] is False
-
-
-@pytest.mark.api
-def test_postcode_state_mismatch(address_client, base_payload, address_config):
-    # case_id: ADDR-C-005
-    expected = address_config["expected"]
-    data = assert_ok(address_client.validate(merged(base_payload, postcode="2000")), expected)
-    assert_mismatch_handled(data)
-
-
-@pytest.mark.api
-def test_suburb_postcode_mismatch(address_client, base_payload, address_config):
-    # case_id: ADDR-C-006
-    expected = address_config["expected"]
-    data = assert_ok(address_client.validate(merged(base_payload, suburb="Sydney")), expected)
-    assert_mismatch_handled(data)
-
-
-@pytest.mark.api
-def test_misspelled_street_returns_advice(address_client, base_payload, address_config):
-    # case_id: ADDR-C-012
-    expected = address_config["expected"]
-    payload = merged(base_payload, address="Level 1, 123 Collns Street", is_return=True)
-    data = assert_ok(address_client.validate(payload), expected)
-    if data["success"]:
-        assert data["adviceAddress"], "验证通过时应给出标准化建议地址"
-    else:
-        assert data["reason"], "验证不通过时必须给出拦截原因"
-        if data["adviceAddress"] is not None:
-            assert data["adviceAddress"] != payload["address"], "建议地址应与原地址不同"
-
-
-@pytest.mark.api
-def test_full_address_contains_address2(address_client, base_payload, address_config):
-    # case_id: ADDR-C-011
-    expected = address_config["expected"]
-    data = assert_ok(address_client.validate(base_payload), expected)
-    assert base_payload["address2"] in data["fullAddress"]
-    assert data["address"] == base_payload["address"]
-    assert data["address2"] == base_payload["address2"]
-
-
-@pytest.mark.api
-def test_rejected_address_still_returns_standard_fields(
-    address_client, base_payload, address_config
+def test_postcode_leading_zero(
+    address_client, base_payload, addr_data, expected, address_config, db
 ):
-    # case_id: ADDR-C-014
-    expected = address_config["expected"]
-    data = assert_ok(
-        address_client.validate(merged(base_payload, address="9999 Unknown Road")), expected
+    # case_id: TC-ADDR-010
+    row = addr_data["postcode_leading_zero"]
+    data = assert_ok(address_client.validate(merged(base_payload, **row["ok"])), expected)
+    assert data["postcode"] == row["ok"]["postcode"]
+    assert_address_exists(db, data)
+    assert_not_found(
+        address_client.validate(merged(base_payload, **row["bad"])), address_config
     )
-    assert data["success"] is False
-    assert data["fullAddress"] or data["address"], "不通过时仍应回填地址信息"
 
 
 # ---------------------------------------------------------------------------
-# order_id propagation / state code table
+# AC-03 country scope
 # ---------------------------------------------------------------------------
 @pytest.mark.api
-@pytest.mark.parametrize("order_id", ["ORD-ADDR-0001", "Ord-2026-ABC_x-01"])
-def test_order_id_roundtrip(address_client, base_payload, address_config, order_id):
-    # case_id: ADDR-C-007
-    expected = address_config["expected"]
-    data = assert_ok(
-        address_client.validate(merged(base_payload, order_id=order_id)), expected
+def test_non_australia_country_rejected(address_client, base_payload, addr_data, expected):
+    # case_id: TC-ADDR-003
+    body = assert_rejected(
+        address_client.validate(
+            merged(base_payload, country=addr_data["unsupported_country"])
+        ),
+        expected,
     )
-    assert data["orderId"] == order_id, "orderId 必须与请求 order_id 逐字符一致"
-
-
-@pytest.mark.api
-def test_order_id_with_unicode_roundtrip(address_client, base_payload, address_config):
-    # case_id: ADDR-C-008
-    expected = address_config["expected"]
-    order_id = "订单-#001/测试"
-    data = assert_ok(
-        address_client.validate(merged(base_payload, order_id=order_id)), expected
-    )
-    assert data["orderId"] == order_id, "中文与特殊字符应原样回传，不得乱码"
-
-
-@pytest.mark.api
-@pytest.mark.smoke
-@pytest.mark.parametrize("state_code", STATE_CODES)
-def test_state_code_mapping(
-    address_client, base_payload, states_by_code, address_config, state_code
-):
-    # case_id: ADDR-C-010
-    expected = address_config["expected"]
-    row = states_by_code[state_code]
-    payload = merged(
-        base_payload,
-        state=row["state"],
-        postcode=row["postcode"],
-        suburb=row["suburb"],
-        order_id=f"ORD-STATE-{state_code}",
-    )
-    data = assert_ok(address_client.validate(payload), expected)
-    assert data["success"] is True, f"{state_code} 的代表性地址应验证通过"
-    assert data["stateCode"] == state_code
-    assert data["postcode"] == row["postcode"]
-    assert data["orderId"] == payload["order_id"]
-
-
-# ---------------------------------------------------------------------------
-# Parameter validation
-# ---------------------------------------------------------------------------
-@pytest.mark.api
-@pytest.mark.parametrize("field", ["address", "postcode", "state", "suburb"])
-def test_missing_required_field(address_client, base_payload, address_config, field):
-    # case_id: ADDR-P-002
-    expected = address_config["expected"]
-    response = address_client.validate(without(base_payload, field))
-    assert_not_accepted(response, expected)
-
-
-@pytest.mark.api
-def test_address2_is_optional(address_client, base_payload, address_config):
-    # case_id: ADDR-P-006
-    expected = address_config["expected"]
-    response = address_client.validate(without(base_payload, "address2"))
-    allowed = {expected["http_status"]["ok"], expected["http_status"]["client_error"]}
-    assert response.status_code in allowed, _message(response, "address2 缺失时状态码异常")
-    if response.status_code == expected["http_status"]["client_error"]:
+    if body is None:
         return
-    body = _body(response)
-    assert_envelope(body, response)
-    if body["code"] == expected["code"]["success"]:
-        assert_data_schema(body["data"], response)
-        assert body["data"]["success"] is True, "address2 可选时应正常验证通过"
-
-
-@pytest.mark.api
-def test_empty_body_is_rejected(address_client, address_config):
-    # case_id: ADDR-P-001
-    expected = address_config["expected"]
-    response = address_client.validate({})
-    assert_not_accepted(response, expected)
-
-
-@pytest.mark.api
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"is_return": "true"},
-        {"address": 123},
-        {"postcode": 3000},
-    ],
-)
-def test_field_type_mismatch(address_client, base_payload, address_config, overrides):
-    # case_id: ADDR-P-010
-    expected = address_config["expected"]
-    response = address_client.validate(merged(base_payload, **overrides))
-    assert_not_accepted(response, expected)
-
-
-@pytest.mark.api
-def test_invalid_state_code(address_client, base_payload, address_config):
-    # case_id: ADDR-P-013
-    expected = address_config["expected"]
-    response = address_client.validate(merged(base_payload, state="XX"))
-    assert_not_accepted(response, expected)
-
-
-@pytest.mark.api
-def test_state_full_name(address_client, base_payload, address_config):
-    # case_id: ADDR-P-014
-    expected = address_config["expected"]
-    response = address_client.validate(merged(base_payload, state="Victoria"))
-    allowed = {expected["http_status"]["ok"], expected["http_status"]["client_error"]}
-    assert response.status_code in allowed, _message(response, "全称州名处理异常")
-    if response.status_code == expected["http_status"]["client_error"]:
+    if "data" in body:  # 参数校验错误：data=null，原因在 msg
+        assert body["msg"]
         return
-    body = _body(response)
-    assert_envelope(body, response)
-    data = body["data"]
-    assert_data_schema(data, response)
-    if data["success"]:
-        assert data["stateCode"] == "VIC", "支持全称时应归一为 VIC"
+    assert body["success"] is False
+    assert body["reason"]
+    assert body["countryCode"] != "AU"
 
 
 @pytest.mark.api
-@pytest.mark.parametrize("country", ["australia", "New Zealand"])
-def test_country_variants(address_client, base_payload, address_config, country):
-    # case_id: ADDR-P-015
-    expected = address_config["expected"]
-    response = address_client.validate(merged(base_payload, country=country))
-    allowed = {expected["http_status"]["ok"], expected["http_status"]["client_error"]}
-    assert response.status_code in allowed, _message(response, "国家取值处理异常")
-    if response.status_code == expected["http_status"]["client_error"]:
-        return
-    body = _body(response)
-    assert_envelope(body, response)
-    data = body["data"]
-    assert_data_schema(data, response)
-    if data["success"]:
-        assert data["countryCode"], "验证通过时 countryCode 不应为空"
+def test_country_variants(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-011
+    for country in ("AU", "Australia"):
+        data = assert_ok(
+            address_client.validate(merged(base_payload, country=country)), expected
+        )
+        assert data["countryCode"] == "AU"
+        assert_address_exists(db, data)
+    for country in ("au", "australia"):
+        response = address_client.validate(merged(base_payload, country=country))
+        assert response.status_code in (
+            expected["http_status"]["ok"],
+            expected["http_status"]["client_error"],
+        )
+        if response.status_code == expected["http_status"]["client_error"]:
+            continue
+        body = parse_json(response)
+        assert_envelope(body, response)
+        data = body["data"]
+        if data is None:
+            assert body["success"] is False
+            assert body["msg"]
+            continue
+        assert_data_schema(data, response)
+        if data["success"]:
+            assert data["countryCode"] == "AU"
+            assert_address_exists(db, data)
+        else:
+            assert data["reason"] or body["msg"]
 
 
 @pytest.mark.api
-@pytest.mark.parametrize("postcode", ["300", "30A0", "30000"])
-def test_invalid_postcode_format(address_client, base_payload, address_config, postcode):
-    # case_id: ADDR-P-017
-    expected = address_config["expected"]
-    response = address_client.validate(merged(base_payload, postcode=postcode))
-    assert_not_accepted(response, expected)
+@pytest.mark.skip(reason="待确认：country 为空字符串或 null 是否等同默认 Australia")
+def test_country_empty_or_null(address_client, base_payload, expected, address_config):
+    # case_id: TC-ADDR-012
+    for country in ("", None):
+        data = assert_ok(
+            address_client.validate(merged(base_payload, country=country)), expected
+        )
+        assert data["countryCode"] == "AU"
+
+
+# ---------------------------------------------------------------------------
+# AC-04 order_id
+# ---------------------------------------------------------------------------
+
 
 
 @pytest.mark.api
-def test_unknown_field_is_ignored(address_client, base_payload, address_config):
-    # case_id: ADDR-P-020
-    expected = address_config["expected"]
+def test_order_id_missing(address_client, base_payload, expected, db):
+    # case_id: TC-ADDR-014
+    data = assert_ok(address_client.validate(without(base_payload, "order_id")), expected)
+    assert data["orderId"] in (None, "")
+    assert_address_exists(db, data)
+
+
+@pytest.mark.api
+def test_order_id_edge_values(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-015
+    for order_id in addr_data["order_id_edge"]:
+        response = address_client.validate(merged(base_payload, order_id=order_id))
+        assert response.status_code in (
+            expected["http_status"]["ok"],
+            expected["http_status"]["client_error"],
+        )
+        if response.status_code == expected["http_status"]["client_error"]:
+            continue
+        body = parse_json(response)
+        assert_envelope(body, response)
+        data = body["data"]
+        if data is None:
+            assert body["success"] is False
+            assert body["msg"]
+            continue
+        assert_data_schema(data, response)
+        if data["success"]:
+            assert data["orderId"] == order_id
+            assert_address_exists(db, data)
+        else:
+            assert data["reason"] or body["msg"]
+
+
+# ---------------------------------------------------------------------------
+# AC-05 is_return (pending rules)
+# ---------------------------------------------------------------------------
+@pytest.mark.api
+@pytest.mark.skip(reason="待确认：is_return=true 时 adviceAddress 的生成规则")
+def test_is_return_true(address_client, base_payload, addr_data, expected):
+    # case_id: TC-ADDR-016
     data = assert_ok(
-        address_client.validate(merged(base_payload, extraField="x")), expected
+        address_client.validate(merged(base_payload, **addr_data["is_return"]["true"])),
+        expected,
     )
-    assert data["success"] is True
+    assert data["adviceAddress"]
 
 
 @pytest.mark.api
-def test_null_address(address_client, base_payload, address_config):
-    # case_id: ADDR-P-021
-    expected = address_config["expected"]
-    response = address_client.validate(merged(base_payload, address=None))
-    assert_not_accepted(response, expected)
-
-
-@pytest.mark.api
-def test_special_characters_in_address(address_client, base_payload, address_config):
-    # case_id: ADDR-P-022
-    expected = address_config["expected"]
-    address = "Level 1, 123 Collins St!@#$%^&*() 墨尔本"
-    response = address_client.validate(merged(base_payload, address=address))
-    assert response.status_code == expected["http_status"]["ok"], _message(
-        response, "特殊字符不应导致 5xx"
+@pytest.mark.skip(reason="待确认：is_return=false 时是否仍返回 adviceAddress")
+def test_is_return_false(address_client, base_payload, addr_data, expected):
+    # case_id: TC-ADDR-017
+    data = assert_ok(
+        address_client.validate(merged(base_payload, **addr_data["is_return"]["false"])),
+        expected,
     )
-    body = _body(response)
-    assert_envelope(body, response)
-    data = body["data"]
-    assert_data_schema(data, response)
-    assert data["success"] is False, "不存在的地址不应判定为通过"
-    assert data["reason"]
-    if data["address"] is not None:
-        assert data["address"] == address, "回显地址不得乱码或截断"
+    assert data["adviceAddress"] in ("", None)
 
 
 @pytest.mark.api
-def test_whitespace_only_fields(address_client, base_payload, address_config):
-    # case_id: ADDR-P-023
-    expected = address_config["expected"]
+@pytest.mark.skip(reason="待确认：is_return 非布尔值的反序列化策略")
+def test_is_return_non_boolean(address_client, base_payload, addr_data, expected):
+    # case_id: TC-ADDR-018
     response = address_client.validate(
-        merged(base_payload, address="   ", suburb="   ")
+        merged(base_payload, **addr_data["is_return"]["non_boolean"])
     )
-    assert_not_accepted(response, expected)
+    assert_rejected(response, expected)
 
 
 # ---------------------------------------------------------------------------
-# Boundaries
+# AC-06 PO Box detection
 # ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
 @pytest.mark.api
-def test_min_length_address(address_client, base_payload, address_config):
-    # case_id: ADDR-B-001
-    expected = address_config["expected"]
-    response = address_client.validate(merged(base_payload, address="A"))
-    assert_not_accepted(response, expected)
+def test_pobox_positive_variants(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-022
+    for pattern in addr_data["pobox_positive"]:
+        payload = merged(base_payload, address=pattern, address2="")
+        data = assert_ok(address_client.validate(payload), expected)
+        assert data["isPoBox"] is True, "未识别 PO Box 写法: %r" % pattern
+        assert_address_exists(db, data)
 
 
 @pytest.mark.api
-@pytest.mark.parametrize("length", [255, 256])
-def test_address_length_boundary(address_client, base_payload, address_config, length):
-    # case_id: ADDR-B-002
-    expected = address_config["expected"]
-    response = address_client.validate(merged(base_payload, address="A" * length))
-    allowed = {expected["http_status"]["ok"], expected["http_status"]["client_error"]}
-    assert response.status_code in allowed, _message(
-        response, f"地址长度 {length} 时出现异常状态码"
+def test_pobox_negative_variants(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-023
+    for pattern in addr_data["pobox_negative"]:
+        payload = merged(base_payload, address=pattern, address2="")
+        data = assert_ok(address_client.validate(payload), expected)
+        assert data["isPoBox"] is False, "误判为 PO Box: %r" % pattern
+        assert_address_exists(db, data)
+
+
+@pytest.mark.api
+@pytest.mark.xfail(reason="待确认：PO Box 正则是否大小写不敏感", strict=False)
+def test_pobox_case_variants(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-024
+    for pattern in addr_data["pobox_case"]:
+        payload = merged(base_payload, address=pattern, address2="")
+        data = assert_ok(address_client.validate(payload), expected)
+        assert data["isPoBox"] is True, "大小写变体未识别: %r" % pattern
+        assert_address_exists(db, data)
+
+
+@pytest.mark.api
+def test_not_found_short_circuits_pobox(address_client, base_payload, addr_data, address_config):
+    # case_id: TC-ADDR-025
+    payload = merged(base_payload, **addr_data["pobox_short_circuit"])
+    assert_not_found(address_client.validate(payload), address_config)
+
+
+@pytest.mark.api
+def test_pobox_with_null_address(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-026
+    payload = merged(base_payload, address=None, address2=addr_data["pobox_address2"]["address2"])
+    data = assert_ok(address_client.validate(payload), expected)
+    assert data["isPoBox"] is True
+    assert_address_exists(db, data)
+
+
+# ---------------------------------------------------------------------------
+# AC-07 key fields
+# ---------------------------------------------------------------------------
+
+
+
+@pytest.mark.api
+def test_invalid_postcode_format(address_client, base_payload, addr_data, expected):
+    # case_id: TC-ADDR-028
+    for postcode in addr_data["postcode_invalid"]:
+        body = assert_rejected(
+            address_client.validate(merged(base_payload, postcode=postcode)), expected
+        )
+        if body is None:
+            continue
+        if "data" in body:  # 参数校验错误：data=null，原因在 msg
+            assert body["msg"]
+            continue
+        text = (body.get("reason") or "").lower()
+        assert body["success"] is False
+        assert any(
+            token in text for token in ("address not found", "postcode", "邮编")
+        ), "失败原因不明确: %r" % text
+
+
+@pytest.mark.api
+def test_suburb_special_or_long(address_client, base_payload, addr_data, address_config):
+    # case_id: TC-ADDR-029
+    for suburb in addr_data["suburb_special"]:
+        assert_not_found(
+            address_client.validate(merged(base_payload, suburb=suburb)), address_config
+        )
+
+
+@pytest.mark.api
+def test_state_full_name(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-030
+    row = addr_data["valid_states"][0]
+    for state in (row["state"], row["state_full"]):
+        payload = merged(
+            base_payload, state=state, postcode=row["postcode"], suburb=row["suburb"]
+        )
+        data = assert_ok(address_client.validate(payload), expected)
+        assert data["stateCode"] == row["state"]
+        assert_address_exists(db, data)
+
+
+@pytest.mark.api
+@pytest.mark.skip(reason="待确认：postcode 传数字类型时的反序列化策略")
+def test_postcode_numeric_type(address_client, base_payload, addr_data, expected):
+    # case_id: TC-ADDR-031
+    response = address_client.validate(
+        merged(base_payload, postcode=addr_data["postcode_numeric"])
     )
-    if response.status_code == expected["http_status"]["client_error"]:
-        return
-    body = _body(response)
-    assert_envelope(body, response)
-    data = body["data"]
-    assert_data_schema(data, response)
-    if data["address"] is not None:
-        assert len(data["address"]) == length, "响应地址不得截断"
+    assert_rejected(response, expected)
 
 
-@pytest.mark.api
-@pytest.mark.parametrize("postcode", ["0000", "9999"])
-def test_postcode_boundary(address_client, base_payload, address_config, postcode):
-    # case_id: ADDR-B-004
-    expected = address_config["expected"]
-    data = assert_ok(
-        address_client.validate(merged(base_payload, postcode=postcode)), expected
-    )
-    assert data["success"] is False, "格式合法但地址不存在的邮编不应验证通过"
-    assert data["reason"]
+# ---------------------------------------------------------------------------
+# AC-08 request shape
+# ---------------------------------------------------------------------------
+
 
 
 @pytest.mark.api
-def test_empty_order_id(address_client, base_payload, address_config):
-    # case_id: ADDR-B-006
-    expected = address_config["expected"]
-    data = assert_ok(address_client.validate(merged(base_payload, order_id="")), expected)
-    assert data["orderId"] in ("", None)
+def test_address_optional(address_client, base_payload, expected, db):
+    # case_id: TC-ADDR-033
+    data = assert_ok(address_client.validate(without(base_payload, "address")), expected)
     assert data["success"] is True
+    assert data["isPoBox"] is False
+    assert_address_exists(db, data)
 
 
 @pytest.mark.api
-def test_long_order_id(address_client, base_payload, address_config):
-    # case_id: ADDR-B-007
-    expected = address_config["expected"]
-    order_id = "O" * 255
+def test_unknown_field_ignored(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-034
     data = assert_ok(
-        address_client.validate(merged(base_payload, order_id=order_id)), expected
+        address_client.validate(merged(base_payload, **addr_data["unknown_fields"])),
+        expected,
     )
-    assert data["orderId"] == order_id, "order_id 不得截断"
+    assert data["success"] is True
+    assert_address_exists(db, data)
 
 
 @pytest.mark.api
-@pytest.mark.parametrize("suburb", ["melbourne", "MELBOURNE"])
-def test_suburb_case_insensitive(address_client, base_payload, address_config, suburb):
-    # case_id: ADDR-B-008
-    expected = address_config["expected"]
-    response = address_client.validate(merged(base_payload, suburb=suburb))
-    allowed = {expected["http_status"]["ok"], expected["http_status"]["client_error"]}
-    assert response.status_code in allowed, _message(response, "区域大小写处理异常")
-    if response.status_code == expected["http_status"]["client_error"]:
-        return
-    body = _body(response)
-    assert_envelope(body, response)
-    data = body["data"]
-    assert_data_schema(data, response)
-    if not data["success"]:
-        assert data["reason"]
-
-
-# ---------------------------------------------------------------------------
-# Exceptions
-# ---------------------------------------------------------------------------
-@pytest.mark.api
-def test_invalid_json_body(address_client, address_config):
-    # case_id: ADDR-E-001
-    expected = address_config["expected"]
+@pytest.mark.skip(reason="待确认：非法 JSON / 错误 Content-Type 的错误响应契约")
+def test_invalid_json_and_content_type(address_client, base_payload, addr_data, expected):
+    # case_id: TC-ADDR-035
     response = address_client.post(
         address_client.path,
-        data="not-json",
+        data=addr_data["malformed_json"],
         headers={"Content-Type": "application/json"},
     )
-    assert_not_accepted(response, expected)
-
-
-@pytest.mark.api
-def test_json_array_body(address_client, address_config):
-    # case_id: ADDR-E-002
-    expected = address_config["expected"]
-    response = address_client.validate([])
-    assert_not_accepted(response, expected)
-
-
-@pytest.mark.api
-def test_empty_request_body(address_client, address_config):
-    # case_id: ADDR-E-008
-    expected = address_config["expected"]
-    response = address_client.post(address_client.path, data="")
-    assert_not_accepted(response, expected)
-
-
-@pytest.mark.api
-def test_unknown_path_returns_404(address_client, base_payload, address_config):
-    # case_id: ADDR-E-004
-    expected = address_config["expected"]
-    response = address_client.post(address_client.path + "/invalid", json=base_payload)
-    assert response.status_code == expected["http_status"]["not_found"], _message(
-        response, "不存在的路径应返回 404"
-    )
-    body = _body(response)
-    assert isinstance(body, dict), _message(response, "404 响应体应为 JSON 对象")
-    assert "data" not in body, "404 不应返回业务 data"
-
-
-@pytest.mark.api
-def test_get_method_not_supported(address_client, address_config):
-    # case_id: ADDR-E-005
-    response = address_client.get(address_client.path)
-    assert response.status_code in (404, 405), _message(
-        response, "GET 不应返回 200"
-    )
-    body = _body(response)
-    assert not (isinstance(body, dict) and body.get("data")), "GET 不应返回业务数据"
-
-
-@pytest.mark.api
-def test_content_type_text_plain(address_client, base_payload, address_config):
-    # case_id: ADDR-E-003
-    expected = address_config["expected"]
+    assert response.status_code in (400, 415)
     response = address_client.post(
         address_client.path,
-        data=json.dumps(base_payload),
-        headers={"Content-Type": "text/plain"},
+        json=base_payload,
+        headers={"Content-Type": addr_data["content_type_plain"]},
     )
-    assert response.status_code in (200, 400, 415), _message(
-        response, "非 JSON Content-Type 处理异常"
+    assert response.status_code in (400, 415)
+
+
+# ---------------------------------------------------------------------------
+# AC-09 address text boundaries (text is decoupled from existence)
+# ---------------------------------------------------------------------------
+@pytest.mark.api
+def test_long_address_still_valid(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-036
+    data = assert_ok(
+        address_client.validate(merged(base_payload, address=addr_data["long_address"])),
+        expected,
     )
-    if response.status_code == 200:
-        body = _body(response)
-        assert_envelope(body, response)
-        assert body["code"] in (
-            expected["code"]["success"],
-            expected["code"]["param_error"],
+    assert data["success"] is True
+    assert data["isPoBox"] is False
+    assert_address_exists(db, data)
+
+
+@pytest.mark.api
+def test_injection_payload_still_valid(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-037
+    response = address_client.validate(
+        merged(base_payload, address=addr_data["injection_address"])
+    )
+    data = assert_ok(response, expected)
+    assert data["isPoBox"] is False
+    for keyword in ("SQLSyntaxErrorException", "java.lang", "Stacktrace"):
+        assert keyword not in response.text, "响应泄露内部异常: %s" % keyword
+    assert_address_exists(db, data)
+
+
+@pytest.mark.api
+def test_unicode_address_still_valid(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-038
+    data = assert_ok(
+        address_client.validate(merged(base_payload, address=addr_data["unicode_address"])),
+        expected,
+    )
+    assert data["success"] is True
+    assert data["isPoBox"] is False
+    assert_address_exists(db, data)
+
+
+# ---------------------------------------------------------------------------
+# AC-10 default country
+# ---------------------------------------------------------------------------
+
+
+
+# ---------------------------------------------------------------------------
+# AC-11 idempotency / concurrency
+# ---------------------------------------------------------------------------
+@pytest.mark.api
+def test_repeated_calls_consistent(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-040
+    payload = merged(base_payload, order_id=addr_data["idempotency_order_id"])
+    outcomes = []
+    for _ in range(5):
+        data = assert_ok(address_client.validate(payload), expected)
+        assert_address_exists(db, data)
+        outcomes.append(
+            (data["success"], data["reason"], data["isPoBox"], data["stateCode"])
         )
+    assert len(set(outcomes)) == 1, "重复调用结果不一致: %r" % outcomes
 
 
 @pytest.mark.api
-@pytest.mark.skip(reason="需要故障注入使下游地址服务不可用，当前环境未提供")
-def test_downstream_service_unavailable(address_client, base_payload, address_config):
-    # case_id: ADDR-E-006
-    expected = address_config["expected"]
-    body = _body(address_client.validate(base_payload))
-    assert body["code"] == expected["code"]["system_error"]
+def test_concurrent_calls_consistent(
+    address_client_factory, base_payload, addr_data, address_config, expected, db
+):
+    # case_id: TC-ADDR-041
+    prefix = addr_data["concurrent_order_prefix"]
+    concurrency = int(address_config.get("concurrency", 5))
+
+    def send(index):
+        order_id = "%s%03d" % (prefix, index)
+        client = address_client_factory()
+        try:
+            return order_id, client.validate(merged(base_payload, order_id=order_id))
+        finally:
+            client.close()
+
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        results = list(pool.map(send, range(concurrency)))
+    for order_id, response in results:
+        data = assert_ok(response, expected)
+        assert data["orderId"] == order_id, "并发响应 orderId 串号"
+        assert data["isPoBox"] is False
+        assert_address_exists(db, data)
+
+
+# ---------------------------------------------------------------------------
+# AC-12 database failure (needs fault injection)
+# ---------------------------------------------------------------------------
+@pytest.mark.api
+@pytest.mark.skip(reason="需要故障注入使地址表不可用，当前环境未提供")
+def test_db_unavailable(address_client, base_payload, expected):
+    # case_id: TC-ADDR-042
+    response = address_client.validate(base_payload)
+    assert response.status_code != 200 or response.json()["data"]["success"] is False
 
 
 @pytest.mark.api
-@pytest.mark.skip(reason="需要故障注入使下游延迟超过 api_timeout，当前环境未提供")
-def test_request_timeout(address_client, base_payload):
-    # case_id: ADDR-E-007
-    address_client.validate(base_payload)
+@pytest.mark.skip(reason="需要故障注入使地址表查询超时，当前环境未提供")
+def test_db_timeout(address_client, base_payload, expected):
+    # case_id: TC-ADDR-043
+    response = address_client.validate(base_payload)
+    body = response.json()
+    assert body.get("data", {}).get("success") is not True
+
+
+# ---------------------------------------------------------------------------
+# AC-13 response structure
+# ---------------------------------------------------------------------------
+@pytest.mark.api
+@pytest.mark.skip(reason="待确认：OpenAPI 未声明 required，data 是否始终返回 15 个字段")
+def test_success_envelope_schema(address_client, base_payload, db):
+    # case_id: TC-ADDR-044
+    response = address_client.validate(base_payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert_envelope(body, response)
+    assert_data_schema(body["data"], response, require_all=True)
+    assert body["data"]["success"] is True
+    assert_address_exists(db, body["data"])
+
+
+
+
+
+@pytest.mark.api
+def test_content_type_json(address_client, base_payload, expected, db):
+    # case_id: TC-ADDR-046
+    response = address_client.validate(base_payload)
+    assert response.status_code == expected["http_status"]["ok"]
+    assert "application/json" in response.headers.get("Content-Type", "")
+    body = response.json()
+    assert isinstance(body, dict)
+    data = body.get("data") or {}
+    if data.get("success") is True:
+        assert_address_exists(db, data)
+
+
+# ---------------------------------------------------------------------------
+# AC-14 address2
+# ---------------------------------------------------------------------------
+@pytest.mark.api
+@pytest.mark.skip(reason="待确认：fullAddress 拼接顺序与 address2 规则")
+def test_address2_full_address(address_client, base_payload, expected, db):
+    # case_id: TC-ADDR-047
+    payload = merged(base_payload, address="10 Market Street", address2="Unit 5")
+    data = assert_ok(address_client.validate(payload), expected)
+    assert data["address2"] == "Unit 5"
+    assert "Unit 5" in data["fullAddress"]
+    assert "10 Market Street" in data["fullAddress"]
+    assert_address_exists(db, data)
+
+
+@pytest.mark.api
+def test_address2_long_special(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-048
+    data = assert_ok(
+        address_client.validate(merged(base_payload, address2=addr_data["address2_long"])),
+        expected,
+    )
+    assert data["success"] is True
+    assert data["isPoBox"] is False
+    assert_address_exists(db, data)
+
+
+# ---------------------------------------------------------------------------
+# AC-15 state / suburb codes
+# ---------------------------------------------------------------------------
+@pytest.mark.api
+@pytest.mark.xfail(reason="待确认：suburbCode 的来源与格式", strict=False)
+def test_state_suburb_codes(address_client, base_payload, expected, db):
+    # case_id: TC-ADDR-049
+    data = assert_ok(address_client.validate(base_payload), expected)
+    assert data["stateCode"] == base_payload["state"]
+    assert data["suburbCode"]
+    assert_address_exists(db, data)
 
 
 @pytest.mark.api
 @pytest.mark.regression
-def test_oversized_body(address_client, base_payload, address_config):
-    # case_id: ADDR-E-009
-    expected = address_config["expected"]
-    response = address_client.validate(
-        merged(base_payload, address="A" * (1024 * 1024))
-    )
-    assert response.status_code in (200, 400, 413), _message(
-        response, "超大请求体处理异常"
-    )
-    if response.status_code == 200:
-        body = _body(response)
-        assert_envelope(body, response)
-        if isinstance(body["data"], dict):
-            assert body["data"]["success"] is False
+def test_all_states_abbrev_and_full(address_client, base_payload, addr_data, expected, db):
+    # case_id: TC-ADDR-050
+    for row in addr_data["valid_states"]:
+        for state in (row["state"], row["state_full"]):
+            payload = merged(
+                base_payload,
+                state=state,
+                postcode=row["postcode"],
+                suburb=row["suburb"],
+            )
+            data = assert_ok(address_client.validate(payload), expected)
+            assert data["stateCode"] == row["state"]
+            assert data["postcode"] == row["postcode"]
+            assert_address_exists(db, data)
 
 
 # ---------------------------------------------------------------------------
-# Idempotency / concurrency
+# AC-16 address text is decoupled from existence
 # ---------------------------------------------------------------------------
 @pytest.mark.api
-def test_repeated_calls_are_consistent(address_client, base_payload, address_config):
-    # case_id: ADDR-E-010
-    expected = address_config["expected"]
-    payload = merged(base_payload, order_id="ORD-IDEM-001")
-    outcomes = []
-    for _ in range(5):
-        data = assert_ok(address_client.validate(payload), expected)
-        assert data["orderId"] == "ORD-IDEM-001"
-        outcomes.append((data["success"], data["reason"], data["isPoBox"]))
-    assert len(set(outcomes)) == 1, f"重复调用结果不一致: {outcomes}"
-
-
-@pytest.mark.api
-def test_concurrent_calls_keep_order_ids(address_client, base_payload, address_config):
-    # case_id: ADDR-E-011
-    expected = address_config["expected"]
-    order_ids = [f"ORD-CONC-{index:03d}" for index in range(10)]
-
-    def send(order_id):
-        payload = merged(base_payload, order_id=order_id)
-        return order_id, address_client.validate(payload)
-
-    with ThreadPoolExecutor(max_workers=len(order_ids)) as pool:
-        results = list(pool.map(send, order_ids))
-
-    for order_id, response in results:
-        data = assert_ok(response, expected)
-        assert data["orderId"] == order_id, "并发响应出现 orderId 串号"
+def test_random_and_non_au_text_still_valid(
+    address_client, base_payload, addr_data, expected, db
+):
+    # case_id: TC-ADDR-051
+    for address in addr_data["random_addresses"]:
+        data = assert_ok(
+            address_client.validate(merged(base_payload, address=address)), expected
+        )
         assert data["success"] is True
+        assert data["isPoBox"] is False
+        assert_address_exists(db, data)

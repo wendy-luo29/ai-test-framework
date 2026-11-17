@@ -1,22 +1,237 @@
 {
   "base": {
-    "address": "Level 1, 123 Collins Street",
-    "address2": "Melbourne",
+    "address": "123 George Street",
+    "address2": "",
     "country": "Australia",
     "is_return": false,
     "order_id": "ORD-ADDR-0001",
-    "postcode": "3000",
-    "state": "VIC",
-    "suburb": "Melbourne"
+    "postcode": "2000",
+    "state": "NSW",
+    "suburb": "Sydney"
   },
-  "states": [
-    { "state": "NSW", "postcode": "2000", "suburb": "Sydney" },
-    { "state": "VIC", "postcode": "3000", "suburb": "Melbourne" },
-    { "state": "QLD", "postcode": "4000", "suburb": "Brisbane" },
-    { "state": "SA", "postcode": "5000", "suburb": "Adelaide" },
-    { "state": "WA", "postcode": "6000", "suburb": "Perth" },
-    { "state": "TAS", "postcode": "7000", "suburb": "Hobart" },
-    { "state": "ACT", "postcode": "2600", "suburb": "Canberra" },
-    { "state": "NT", "postcode": "0800", "suburb": "Darwin" }
-  ]
+  "valid_states": [
+    {
+      "state": "NSW",
+      "state_full": "New South Wales",
+      "postcode": "2000",
+      "suburb": "Sydney"
+    },
+    {
+      "state": "VIC",
+      "state_full": "Victoria",
+      "postcode": "3000",
+      "suburb": "Melbourne"
+    },
+    {
+      "state": "QLD",
+      "state_full": "Queensland",
+      "postcode": "4000",
+      "suburb": "Brisbane"
+    },
+    {
+      "state": "WA",
+      "state_full": "Western Australia",
+      "postcode": "6000",
+      "suburb": "Perth"
+    },
+    {
+      "state": "SA",
+      "state_full": "South Australia",
+      "postcode": "5000",
+      "suburb": "Adelaide"
+    },
+    {
+      "state": "TAS",
+      "state_full": "Tasmania",
+      "postcode": "7000",
+      "suburb": "Hobart"
+    },
+    {
+      "state": "ACT",
+      "state_full": "Australian Capital Territory",
+      "postcode": "2600",
+      "suburb": "Canberra"
+    },
+    {
+      "state": "NT",
+      "state_full": "Northern Territory",
+      "postcode": "0800",
+      "suburb": "Darwin"
+    }
+  ],
+  "key_case_whitespace": [
+    {
+      "state": "nsw",
+      "suburb": "sydney"
+    },
+    {
+      "postcode": " 2000 ",
+      "suburb": "Sydney"
+    },
+    {
+      "state": "NSW ",
+      "suburb": " Sydney"
+    }
+  ],
+  "key_null_empty": [
+    {
+      "state": null
+    },
+    {
+      "postcode": null
+    },
+    {
+      "suburb": null
+    },
+    {
+      "state": ""
+    },
+    {
+      "postcode": ""
+    },
+    {
+      "suburb": ""
+    }
+  ],
+  "postcode_leading_zero": {
+    "ok": {
+      "state": "NT",
+      "postcode": "0800",
+      "suburb": "Darwin"
+    },
+    "bad": {
+      "state": "NT",
+      "postcode": "800",
+      "suburb": "Darwin"
+    }
+  },
+  "country_variants": [
+    "AU",
+    "au",
+    "Australia",
+    "australia"
+  ],
+  "order_ids": [
+    "ORD-20261117-0001",
+    "Ord-2026-ABC_x-01"
+  ],
+  "order_id_edge": [
+    "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
+    "订单-#001/测试"
+  ],
+  "pobox_primary": {
+    "address": "PO Box 1234",
+    "address2": "Level 5"
+  },
+  "pobox_address2": {
+    "address": "123 George Street",
+    "address2": "PO Box 1234"
+  },
+  "pobox_none": {
+    "address": "123 George Street",
+    "address2": "Level 5"
+  },
+  "pobox_positive": [
+    "PO Box 123",
+    "P.O. Box 123",
+    "P O Box 123",
+    "POBox 123",
+    "POB 123",
+    "GPO Box 123",
+    "GPOBOX 123",
+    "GPO",
+    "LPO",
+    "Parcel Locker 123",
+    "Parcel Collect 123",
+    "P. Locker 123",
+    "P Locker 123",
+    "Postal Locker 123",
+    "Post Box 123",
+    "Post Shop 123",
+    "Post Office 123",
+    "Box 123",
+    "RMB 123",
+    "PMB 123",
+    "co Po 123",
+    "PO 123 Box",
+    "P.O.Box 123",
+    "Post   Office"
+  ],
+  "pobox_negative": [
+    "Boxing Street",
+    "Polo Road",
+    "Poby Lane",
+    "PO Boxes",
+    "Parcel Service",
+    "Post Road",
+    "Apple Box Road",
+    "LPOX Road",
+    "PMBX 1",
+    "Postal Road",
+    "Polo Box",
+    "Box Hill"
+  ],
+  "pobox_case": [
+    "po box 1",
+    "Po BoX 1",
+    "P.O. Box 1",
+    "P . O . Box 1",
+    "P.O.Box 1",
+    "P  O  Box 1",
+    "Post   Office",
+    "pO bOx"
+  ],
+  "postcode_invalid": [
+    "20A0",
+    "200",
+    "20000"
+  ],
+  "suburb_special": [
+    "<script>alert(1)</script>",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  ],
+  "unknown_fields": {
+    "address3": "x",
+    "unknownField": 1
+  },
+  "long_address": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "injection_address": "<script>alert(1)</script>'; DROP TABLE address;--",
+  "unicode_address": "悉尼市乔治街123号 🏠",
+  "address2_long": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+  "random_addresses": [
+    "asdkjfh12398 !!! ???",
+    "1600 Amphitheatre Parkway, Mountain View, CA 94043"
+  ],
+  "is_return": {
+    "true": {
+      "is_return": true
+    },
+    "false": {
+      "is_return": false
+    },
+    "non_boolean": {
+      "is_return": "true"
+    }
+  },
+  "postcode_numeric": 2000,
+  "malformed_json": "{\"state\":\"NSW\",",
+  "content_type_plain": "text/plain",
+  "not_found": {
+    "suburb": "NotARealSuburb",
+    "postcode": "9999",
+    "state": "XX",
+    "cross": {
+      "state": "NSW",
+      "postcode": "3000",
+      "suburb": "Melbourne"
+    }
+  },
+  "arbitrary_address": "ZZZ Not A Real Street 999",
+  "unsupported_country": "ZZ",
+  "idempotency_order_id": "ORD-IDEM-001",
+  "concurrent_order_prefix": "ORD-CONC-",
+  "pobox_short_circuit": {
+    "address": "PO Box 1234",
+    "suburb": "NotARealSuburb"
+  }
 }

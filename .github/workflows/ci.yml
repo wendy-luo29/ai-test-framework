@@ -28,8 +28,30 @@ jobs:
           python -m http.server 8000 &
           sleep 2
 
-      # 修改步骤：运行测试，并把本地 IP 通过环境变量传给 Python
+      # 运行测试并生成 junit + html 报告（失败也继续后续发送步骤）
       - name: Run tests
         env:
           CI_API_URL: "http://127.0.0.1:8000" # 告诉测试代码用本地回环地址
-        run: pytest tests/ -v
+        run: |
+          mkdir -p reports
+          python -m pytest tests -v \
+            --junitxml=reports/junit.xml \
+            --html=reports/report.html --self-contained-html
+
+      - name: Upload test report
+        id: report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: |
+            reports/junit.xml
+            reports/report.html
+
+      - name: Notify Feishu
+        if: always()
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          REPORT_URL: ${{ steps.report.outputs.artifact-url }}
+          TEST_ENV: "GitHub Actions"
+        run: python scripts/send_report.py

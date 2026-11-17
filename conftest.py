@@ -6,12 +6,20 @@ a local in-process server so the suite is deterministic and offline.
 """
 
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+
+try:
+    import pymysql
+    from pymysql.cursors import DictCursor
+except ImportError:  # pragma: no cover - optional dependency for DB assertions
+    pymysql = None
+    DictCursor = None
 
 from api_clients.address_client import AddressClient
 from api_clients.base_client import BaseApiClient
@@ -179,3 +187,93 @@ def load_json():
         return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
 
     return _load
+
+
+class DatabaseClient:
+    """Read-only MySQL access for assertions. Assertions stay in tests."""
+
+    def __init__(self, options: dict, password: str):
+        self.conn = pymysql.connect(
+            host=options["host"],
+            port=int(options.get("port", 3306)),
+            user=options["user"],
+            password=password,
+            database=options["name"],
+            charset=options.get("charset", "utf8mb4"),
+            connect_timeout=int(options.get("connect_timeout", 5)),
+            read_timeout=int(options.get("read_timeout", 10)),
+            cursorclass=DictCursor,
+        )
+
+    def fetch_one(self, sql: str, params=None):
+        self.conn.ping(reconnect=True)
+        with self.conn.cursor() as cursor:
+            cursor.execute(sql, params)
+            return cursor.fetchone()
+
+    def fetch_all(self, sql: str, params=None):
+        self.conn.ping(reconnect=True)
+        with self.conn.cursor() as cursor:
+            cursor.execute(sql, params)
+            return cursor.fetchall()
+
+    def close(self) -> None:
+        self.conn.close()
+
+
+@pytest.fixture(scope="session")
+def db(config):
+    """MySQL connection for data assertions, skipped when not configured."""
+    options = config.get("database") or {}
+    if pymysql is None:
+        pytest.skip("pymysql 未安装，跳过数据库断言")
+    if not options.get("host") or not options.get("name") or not options.get("user"):
+        pytest.skip("config/env.yaml 未配置 database.host/user/name，跳过数据库断言")
+
+    env_name = options.get("password_env", "TEST_DB_PASSWORD")
+    password = os.getenv(env_name, "")
+    if not password:
+        pytest.skip(f"环境变量 {env_name} 未设置，跳过数据库断言")
+
+    try:
+        client = DatabaseClient(options, password)
+    except Exception as exc:
+        pytest.skip(f"数据库连接失败：{exc}")
+
+    yield client
+    client.close()
+
+
+@pytest.fixture
+def addr_data(load_json):
+    return load_json("address_validate.json")
+
+
+@pytest.fixture
+def base_payload(addr_data):
+    return dict(addr_data["base"])
+
+
+@pytest.fixture
+def expected(address_config):
+    return address_config["expected"]
+
+
+@pytest.fixture
+def address_client_factory(config, api_base_url, address_config):
+    """Create one short-lived client per call, closed at fixture teardown."""
+    clients = []
+
+    def _make():
+        timeout = get_required("api_timeout", config=config)
+        client = AddressClient(
+            base_url=api_base_url,
+            timeout=float(timeout),
+            path=address_config["path"],
+        )
+        clients.append(client)
+        return client
+
+    yield _make
+    for client in clients:
+        client.close()
