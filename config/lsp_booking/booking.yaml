@@ -1,0 +1,13 @@
+# LspBooking - 申报/下单模块占位
+
+# Carrier A
+carrier_a:
+  v1.0:
+    path: "/carrier-a/booking"
+    api_timeout: 25
+
+# Carrier B
+carrier_b:
+  v1.0:
+    path: "/carrier-b/booking"
+    api_timeout: 25

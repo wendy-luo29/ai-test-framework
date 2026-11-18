@@ -1,0 +1,23 @@
+# Carrier A 计费配置 — v2.0（2026-12-01 上线）
+# 从 v1.2 继承，只写差异项（继承由 config_loader 处理）
+
+version: "v2.0"
+pricing_path: "/carrier-a/v2/pricing"
+
+# 体积重系数升级：5000 → 4000
+volumetric_coefficient: 4000
+
+# 基础费用保持
+base_fee: 8.50
+
+# 重量阶梯：v2.0 略有调整
+weight_tiers:
+  - { max: 3,   rate: 1.50 }
+  - { max: 10,  rate: 0.95 }
+  - { max: 30,  rate: 0.75 }
+  - { max: null, rate: 0.55 }
+
+# 新增：偏远地区附加费（$3.50/包裹）
+remote_area_surcharge:
+  amount: 3.50
+  flag_param: "is_remote_area"

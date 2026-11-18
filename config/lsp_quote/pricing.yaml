@@ -1,0 +1,9 @@
+# LspQuote - 通用计费规则
+# 承运商变体在 carriers/ 子目录覆盖
+
+# 默认 API 路径，承运商可覆盖
+pricing_path: "/quote/pricing"
+compare_path: "/quote/compare"
+
+# 计费模式：dimensional / weight_based / flat_rate
+default_billing_mode: dimensional

@@ -1,0 +1,28 @@
+# LspBackend - address_validation 模块配置
+# 合并自 config/env.yaml 的 address_validation 区块
+# 当前版本：v2.1（无承运商差异，所有承运商共用）
+
+path: "/address/validate"
+default_country: "Australia"
+concurrency: 10
+
+# 业务 reason 文案（confirmed 2026-11-15）
+reason:
+  not_found: "address not found"
+
+# 预期响应基线（用于断言）
+expected:
+  http_status:
+    ok: 200
+    client_error: 400
+    not_found: 404
+
+  code:
+    success: "200"
+    param_error: "400"
+    system_error: "500"
+
+  msg:
+    success: "success"
+    param_error: "待确认"
+    system_error: "待确认"

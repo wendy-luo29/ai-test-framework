@@ -1,0 +1,17 @@
+# Carrier B 计费配置 — v1.0（稳定版本）
+
+version: "v1.0"
+pricing_path: "/carrier-b/v1/pricing"
+
+volumetric_coefficient: 6000
+base_fee: 6.00
+
+weight_tiers:
+  - { max: 5,   rate: 1.00 }
+  - { max: 15,  rate: 0.80 }
+  - { max: null, rate: 0.60 }
+
+# Carrier B 外部 API 较慢，超时覆盖
+api_timeout: 15
+
+remote_area_surcharge: null

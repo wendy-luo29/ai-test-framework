@@ -1,0 +1,8 @@
+# Strategy Config（策略配置）—— LspBackend 第二功能模块
+# 目前占位，接口文档待补充
+
+path: "/strategy/config"
+expected:
+  http_status:
+    ok: 200
+    client_error: 400

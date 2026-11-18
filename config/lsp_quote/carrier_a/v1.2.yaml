@@ -1,0 +1,24 @@
+# Carrier A 计费配置 — v1.2（当前线上版本，即将升级）
+# 版本化：v2.0 在 v2.0.yaml 覆盖差异项
+
+version: "v1.2"
+pricing_path: "/carrier-a/v1/pricing"
+
+# 体积重系数 v1.2：5000（v2.0 变为 4000）
+volumetric_coefficient: 5000
+
+# 基础费用（固定 $）
+base_fee: 8.50
+
+# 重量阶梯（kg → $/kg）
+weight_tiers:
+  - { max: 5,   rate: 1.20 }
+  - { max: 10,  rate: 0.90 }
+  - { max: 30,  rate: 0.70 }
+  - { max: null, rate: 0.50 }   # null = 无上限
+
+# 承运商特定超时（覆盖 base.yaml 的 api_timeout: 30）
+api_timeout: 20
+
+# 偏远地区附加费 v1.2：无此功能（v2.0 新增）
+remote_area_surcharge: null

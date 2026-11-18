@@ -1,8 +1,10 @@
-"""Shared fixtures: a bundled demo server plus wiring to config/env.yaml.
+"""Root conftest: shared fixtures across ALL test modules.
 
-All URLs, credentials, and timeouts come from config/env.yaml via
-config/config_loader.py. When the UI/API base URLs are empty, tests run against
-a local in-process server so the suite is deterministic and offline.
+只放跨模块通用的东西：config、DB 连接、HTTP server demo、
+browser_context_args、load_json 辅助。
+
+模块专属 fixture（如 address_client、quote_client 等）
+放在各自模块的 conftest.py 里。
 """
 
 import json
@@ -17,15 +19,14 @@ import pytest
 try:
     import pymysql
     from pymysql.cursors import DictCursor
-except ImportError:  # pragma: no cover - optional dependency for DB assertions
+except ImportError:  # pragma: no cover
     pymysql = None
     DictCursor = None
 
-from api_clients.address_client import AddressClient
-from api_clients.base_client import BaseApiClient
-from config.config_loader import ConfigError, get_config, get_required
+from config.config_loader import ConfigError, get_config
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_DIR = PROJECT_ROOT / "data"
 
 DEMO_HTML = """<!doctype html>
 <html lang="en">
@@ -38,7 +39,6 @@ DEMO_HTML = """<!doctype html>
 """
 
 DEMO_POSTS = {1: {"id": 1, "title": "demo post", "body": "hello", "userId": 1}}
-
 DEMO_USERS = {
     1: {
         "user_id": 1,
@@ -114,6 +114,7 @@ class _DemoHandler(BaseHTTPRequestHandler):
 
 @pytest.fixture(scope="session")
 def local_server():
+    """When service URLs are empty → tests run against this in-process server."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), _DemoHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -127,21 +128,25 @@ def local_server():
 
 @pytest.fixture(scope="session")
 def config():
+    """Merged configuration from config/env.yaml or config/base.yaml."""
     return get_config()
 
 
 @pytest.fixture(scope="session")
 def ui_base_url(config, local_server):
-    return config.get("ui_base_url") 
+    """UI base URL; empty → demo server."""
+    return config.get("ui_base_url")
 
 
 @pytest.fixture(scope="session")
 def api_base_url(config, local_server):
+    """Default API base URL; empty → demo server."""
     return config.get("api_base_url")
+
 
 @pytest.fixture(scope="session")
 def browser_context_args(browser_context_args, ui_base_url):
-    """Inject the UI base URL and a fixed viewport into every browser context."""
+    """Inject base URL and fixed viewport into every browser context."""
     return {
         **browser_context_args,
         "base_url": ui_base_url,
@@ -149,48 +154,29 @@ def browser_context_args(browser_context_args, ui_base_url):
     }
 
 
-@pytest.fixture
-def api_client(config, api_base_url):
-    timeout = get_required("api_timeout", config=config)
-    if not isinstance(timeout, (int, float)):
-        raise ConfigError("'api_timeout' must be a number in config/env.yaml")
-    client = BaseApiClient(api_base_url, timeout=float(timeout))
-    yield client
-    client.close()
-
-
-@pytest.fixture(scope="session")
-def address_config(config):
-    """Raw address_validation block: path, default_country, expected code table."""
-    return get_required("address_validation", config=config)
-
-
-@pytest.fixture
-def address_client(config, api_base_url, address_config):
-    timeout = get_required("api_timeout", config=config)
-    if not isinstance(timeout, (int, float)):
-        raise ConfigError("'api_timeout' must be a number in config/env.yaml")
-    client = AddressClient(
-        api_base_url,
-        timeout=float(timeout),
-        path=address_config["path"],
-    )
-    yield client
-    client.close()
-
-
 @pytest.fixture(scope="session")
 def load_json():
-    """Load a JSON file from data/ by filename."""
+    """Load a JSON file from data/<module>/ or data/ by filename."""
 
-    def _load(name: str):
-        return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
+    def _load(module_or_name: str, name: str | None = None):
+        # Callable signatures:
+        #   load_json("address_validate.json")             → data/address_validate.json
+        #   load_json("lsp_backend", "address_validate.json") → data/lsp_backend/address_validate.json
+        if name is None:
+            path = DATA_DIR / module_or_name
+        else:
+            path = DATA_DIR / module_or_name / name
+        return json.loads(path.read_text(encoding="utf-8"))
 
     return _load
 
 
+# ──────────────────────────────────────────────────────────
+# DatabaseClient (跨模块通用，只读断言)
+# ──────────────────────────────────────────────────────────
+
 class DatabaseClient:
-    """Read-only MySQL access for assertions. Assertions stay in tests."""
+    """Read-only MySQL access for assertions. Queries stay in tests."""
 
     def __init__(self, options: dict, password: str):
         self.conn = pymysql.connect(
@@ -223,12 +209,12 @@ class DatabaseClient:
 
 @pytest.fixture(scope="session")
 def db(config):
-    """MySQL connection for data assertions, skipped when not configured."""
+    """MySQL connection for data assertions. Skips when not configured."""
     options = config.get("database") or {}
     if pymysql is None:
         pytest.skip("pymysql 未安装，跳过数据库断言")
     if not options.get("host") or not options.get("name") or not options.get("user"):
-        pytest.skip("config/env.yaml 未配置 database.host/user/name，跳过数据库断言")
+        pytest.skip("config/base.yaml 未配置 database.host/user/name，跳过数据库断言")
 
     env_name = options.get("password_env", "TEST_DB_PASSWORD")
     password = os.getenv(env_name, "")
@@ -242,38 +228,3 @@ def db(config):
 
     yield client
     client.close()
-
-
-@pytest.fixture
-def addr_data(load_json):
-    return load_json("address_validate.json")
-
-
-@pytest.fixture
-def base_payload(addr_data):
-    return dict(addr_data["base"])
-
-
-@pytest.fixture
-def expected(address_config):
-    return address_config["expected"]
-
-
-@pytest.fixture
-def address_client_factory(config, api_base_url, address_config):
-    """Create one short-lived client per call, closed at fixture teardown."""
-    clients = []
-
-    def _make():
-        timeout = get_required("api_timeout", config=config)
-        client = AddressClient(
-            base_url=api_base_url,
-            timeout=float(timeout),
-            path=address_config["path"],
-        )
-        clients.append(client)
-        return client
-
-    yield _make
-    for client in clients:
-        client.close()

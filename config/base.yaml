@@ -1,0 +1,52 @@
+# 基础配置 — 通用值，各模块/承运商/版本可覆盖
+# 查找优先级：carrier/version.yaml → carrier.yaml → module.yaml → base.yaml
+# 密码/密钥一律通过环境变量注入，禁止明文
+
+# ── 运行环境 ──
+# 留空 → conftest.py 内置本地 demo server（离线回归）
+# 填了 → 指向对应环境（开发/预发/生产）
+env: local            # local / dev / staging / prod
+
+# ── 服务地址 ──
+# 按环境分开，env.yaml 的单 api_base_url 已废弃
+services:
+  lsp_backend:
+    local: ""
+    dev: "http://192.168.1.71:13109"
+    staging: ""
+    prod: ""
+  lsp_quote:
+    local: ""
+    dev: ""
+    staging: ""
+    prod: ""
+  lsp_booking:
+    local: ""
+    dev: ""
+    staging: ""
+    prod: ""
+
+# ── 通用请求超时（秒） ──
+# 承运商特定超时在 carrier 配置里覆盖
+api_timeout: 30
+
+# ── UI 基础地址 ──
+ui_base_url: ""
+
+# ── 鉴权凭据（如果需要） ──
+credentials:
+  username: ""
+  password: ""
+
+# ── MySQL 连接（仅供断言使用，只读） ──
+# host/user/name 任一为空 → DB 断言用例自动 skip
+# 密码通过 password_env 指向的环境变量注入
+database:
+  host: "192.168.1.31"
+  port: 13306
+  user: "Wendy"
+  name: "lsp_scp"
+  password_env: "TEST_DB_PASSWORD"
+  charset: "utf8mb4"
+  connect_timeout: 5
+  read_timeout: 10
