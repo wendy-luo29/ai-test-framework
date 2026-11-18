@@ -24,7 +24,7 @@ owner: wendy-luo29
 | 请求类型 | `application/json` |
 | 响应类型 | `application/json` |
 | 鉴权方式 | 未声明（`security` 为空） |
-| 幂等说明 | `requestId` 作为请求唯一标识，用于幂等与链路追踪 |
+| 幂等说明 | `requestId` 作为请求唯一标识，用于幂等与链路追踪；幂等验收口径：**重复提交不会把事做两遍**（不重复计费、不重复推送） |
 | 调用方 | ERP 下单或运费试算流程 |
 | 调用频率 | 随订单量触发 |
 
@@ -43,16 +43,16 @@ owner: wendy-luo29
 | requestId | string | 否 | — | — | 请求唯一ID |
 | ownerId | string | 是 | — | — | 归属人 ID |
 | orderCode | string | 是 | 最大长度 32 | — | ERP 销售订单号 |
-| carrierStrategyCode | string | 是 | 物流策略编码，可从策略列表接口获得，也可传数组 ID 集合；规则：`VIR\|carrierId\|carrierId` | — | 物流策略编码；必填依据为字段上的 `@NotBlank` |
-| carrierIds | array\<string\> | 否 | — | — | 承运商 ID 数组 |
+| carrierStrategyCode | string | 条件必填 | 与 `carrierIds` **不能同时为空**（二选一或同时传均可）；取值两种形式：① 指定策略编码（如 `quote_price`，可从策略列表接口获得）② 指定承运商，格式 `VIR\|carrierId\|carrierId` | — | 物流策略编码；同时传时与 `carrierIds` 的优先级待确认（接口级用例可忽略，页面逻辑） |
+| carrierIds | array\<string\> | 条件必填 | 与 `carrierStrategyCode` **不能同时为空** | — | 承运商 ID 数组 |
 | shipmentType | string | 否 | — | — | 计费流水号分类，用于区分计费场景 |
 | shipTo | object | 是 | 见 2.3 | — | 派件地信息 |
 | warehouse | array\<object\> | 是 | 见 2.4 | — | 发件地信息 |
 | isPushWms | boolean | 否 | 与 `pushResultTo` 关联使用 | — | 是否推送结果到终端；为 `true` 时按 `pushResultTo` 推送 |
-| pushResultTo | integer | 否 | 0 不推送 \| 100 SCP \| 200 WMS \| 300 ERP | 100 | 设置结果推送 |
+| pushResultTo | integer | 否 | 0 不推送 \| 100 SCP \| 200 WMS \| 300 ERP；**接口直调场景传 0**，100/200/300 仅业务流程链路使用 | 100 | 设置结果推送 |
 | shippingType | integer | 否 | 100 发货单 \| 200 退货单 \| 300 手工单 \| 600 其他单 | 100 | 发货单类型 |
 | closePoboxCheck | integer | 否 | 100 关闭 \| 200 不关闭 | 200 | 是否关闭 PO Box 检查 |
-| bookingOrderId | string | 否 | 申报运费计费时传入 | — | 申报单号 |
+| bookingOrderId | string | 否 | 申报运费计费时传入（仅业务流程链路触发；接口级测试不覆盖该分支） | — | 申报单号 |
 
 ### 2.3 派件地址（shipTo / QuoteTaskAddressDto）
 
@@ -250,7 +250,7 @@ owner: wendy-luo29
 ### 流程
 
 1. 接收上游订单、发件仓与包裹 / SKU 明细。
-2. 按 `carrierStrategyCode` 选策略或指定承运商 ID，格式 `VAR|CAR2025062611067266788`。
+2. 按 `carrierStrategyCode` 选策略或指定承运商 ID：① 指定策略（如 `quote_price`）② 指定承运商（格式 `VIR|carrierId|carrierId`）；与 `carrierIds` 不能同时为空。
 3. 逐个承运商计算运费，返回报价数组。
 4. 按 `address1` / `address2` 检查 PO Box：`closePoboxCheck=200` 时邮筒地址只走澳邮；为 `null` 或 `100` 时按策略与指定承运商计算。
 5. 按比价结果标记 `isBest`、`choiceShippingCost`。
