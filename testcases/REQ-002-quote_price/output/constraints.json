@@ -1,0 +1,30 @@
+{
+  "requirement_id": "REQ-002",
+  "extracted_at": "2026-11-19",
+  "sources": [
+    "requirements/docs/REQ-002_quote_price_sync.md",
+    "requirements/specs/lsp_quote/quote_price/all.v1.0.0.json",
+    "lsp_scp (DB schema)",
+    "lsp_scp.lsp_carrier_rate (实测数据)"
+  ],
+  "constraints": [
+    {"id": "BC-001", "category": "threshold", "dimension": "三边之和(长+宽+高)", "operator": "<=", "threshold": 120, "unit": "cm", "precision": 0.01, "granularity": "单个包裹", "source": "文档 §7 箱规限制「三边之和 >120cm 不可发」", "note": "开区间描述，等价于 <=120 可发"},
+    {"id": "BC-002", "category": "threshold", "dimension": "最长边", "operator": "<=", "threshold": 120, "unit": "cm", "precision": 0.01, "granularity": "单个包裹", "source": "文档 §7「最长边 >120cm 不可发」", "note": "与 BC-001 数值重叠，长边>120 必然导致三边和>120，不可独立验证"},
+    {"id": "BC-003", "category": "threshold", "dimension": "计费重(取整后)", "operator": "<=", "threshold": 22, "unit": "kg", "precision": 0.01, "granularity": "单个包裹", "source": "文档 §7「称重 >22kg 不可发」", "note": "取整时机未定义（Q 项）；三边和<=120 时体积重最大约 16kg，本约束只能由实重触发"},
+    {"id": "BC-004", "category": "segment", "dimension": "价卡分段下界", "operator": ">=", "threshold": 1.001, "unit": "kg", "precision": 0.001, "granularity": "单个包裹", "source": "文档 §5 示例备注「1.001~3.0kg」+ DB 实测", "note": "两承运商 4 段：0.1/1.001/3.001/5.001"},
+    {"id": "BC-005", "category": "segment", "dimension": "价卡分段上界", "operator": "<=", "threshold": 3.0, "unit": "kg", "precision": 0.001, "granularity": "单个包裹", "source": "文档 §5 示例备注 + DB 实测", "note": "取整后实际可达切换点为 1↔2、3↔4、5↔6"},
+    {"id": "BC-006", "category": "segment", "dimension": "首重段切换点", "operator": "<=", "threshold": 5.0, "unit": "kg", "precision": 0.001, "granularity": "单个包裹", "source": "文档 §7 计算规则「w<=5 用 fee；(w-5)*per_kg」+ DB 实测", "note": "5.001 段 fee 恒等于 3.001~5.0 段 fee，增量仅来自 per_kg"},
+    {"id": "BC-007", "category": "formula", "dimension": "金额精度", "operator": "round", "threshold": 3, "unit": "位", "precision": 0.0005, "granularity": "字段", "source": "文档 §7「四舍五入保留三位小数」", "note": "舍入模式（half-up/half-even）未定义，登记 Q 项"},
+    {"id": "BC-008", "category": "schema", "dimension": "SKU 尺寸/重量最小值", "operator": ">=", "threshold": 0.01, "unit": "cm/kg", "precision": 0.01, "granularity": "字段", "source": "OpenAPI schema minimum: 0.01", "note": "0.01 通过（TC-QTS-048）、0 拒绝（TC-QTS-042）"},
+    {"id": "BC-009", "category": "schema", "dimension": "SKU 数量最小值", "operator": ">=", "threshold": 1, "unit": "件", "precision": 1, "granularity": "字段", "source": "OpenAPI schema minimum: 1", "note": "已由 TC-QTS-026 覆盖"},
+    {"id": "BC-010", "category": "dbfield", "dimension": "orderCode 长度", "operator": "<=", "threshold": 32, "unit": "字符", "precision": 1, "granularity": "字段", "source": "DB lsp_quote_task.order_code varchar(32)", "note": "已由 TC-QTS-024 覆盖"},
+    {"id": "BC-011", "category": "dbfield", "dimension": "sku 长度", "operator": "<=", "threshold": 40, "unit": "字符", "precision": 1, "granularity": "字段", "source": "DB lsp_quote_task_package_sku.sku varchar(40)", "note": "已由 TC-QTS-025 覆盖"},
+    {"id": "BC-012", "category": "dbfield", "dimension": "包裹数量", "operator": "n/a", "threshold": null, "unit": "个", "precision": null, "granularity": "请求", "source": "文档 §8「单次最大包裹数未说明」", "note": "缺失，无法测上界；已登记 M 项"},
+    {"id": "BC-013", "category": "segment", "dimension": "zone 取卡", "operator": "=", "threshold": null, "unit": "zone", "precision": null, "granularity": "单个包裹", "source": "DB lsp_carrier_rate.from_zone/to_zone", "note": "同重量 ADL 与 ASP fee 不同（A 7.87/13.81），TC-QTS-044 覆盖"},
+    {"id": "BC-014", "category": "segment", "dimension": "最低段起点", "operator": ">=", "threshold": 0.1, "unit": "kg", "precision": 0.001, "granularity": "单个包裹", "source": "DB 实测 A=0.1 / B=0.001", "note": "计费重向上取整后两卡差异不可观测；TC-QTS-047 验证首段可达"},
+    {"id": "BC-015", "category": "formula", "dimension": "续重单位累加 per_kg", "operator": "+=", "threshold": 1, "unit": "kg", "precision": 0.01, "granularity": "单个包裹", "source": "文档 §7 fee+(w-5)×per_kg + DB 实测", "note": "5.001~99999999 为最后一段，无二次阶梯；TC-QTS-067/071 覆盖"},
+    {"id": "BC-016", "category": "formula", "dimension": "续重取整切换点", "operator": "ceil", "threshold": 6, "unit": "kg", "precision": 0.01, "granularity": "单个包裹", "source": "文档 §7「发运重向上取整」", "note": "6.00 与 6.01 跨一个续重单位；TC-QTS-068 覆盖"},
+    {"id": "BC-017", "category": "segment", "dimension": "续重段起点可达性", "operator": ">=", "threshold": 5.001, "unit": "kg", "precision": 0.001, "granularity": "单个包裹", "source": "DB 实测段起点 5.001", "note": "5.001 取整为 6kg 后进续重段；TC-QTS-069 覆盖"},
+    {"id": "BC-018", "category": "formula", "dimension": "续重 per_kg 随 zone 变化", "operator": "=", "threshold": null, "unit": "元/kg", "precision": 0.0001, "granularity": "单个包裹", "source": "DB 实测 ADL A=0.34/B=0.37，ASP A=1.44/B=1.13", "note": "全 zone 分布 A 0.34~1.44（6 种）、B 0.27~3.13（48 种）；TC-QTS-070 覆盖"}
+  ]
+}

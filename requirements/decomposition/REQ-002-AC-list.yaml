@@ -1,0 +1,514 @@
+# REQ-002 需求功能拆分 — AC 清单
+# 拆分依据: requirements/docs/REQ-002_quote_price_sync.md (V1.1, 含 4+补 回填)
+# 评审记录: requirements/reviews/REQ-002-review.md (REV-REQ-002-004 + 4+补, conditional-pass)
+# 待确认编号复用评审记录的 R-xxx / 存量 Q-xxx 编号，不新造编号，保证可追溯。
+
+requirement_id: REQ-002
+需求名称: 承运商运费计算同步接口（POST /quote/price_sync）
+模块: lsp_quote
+功能域: quote_price
+接口版本: v1.1
+拆分日期: 2026-11-19
+
+业务对象: [计费任务(QuoteTask), 报价结果(QuotePriceSyncVo), 承运商/价卡/zone 主数据]
+核心角色: [调用方(ERP 下单/运费试算), 计费服务(被测接口), 承运商询价(第三方), SCP/WMS/ERP(推送目标, 接口级不覆盖)]
+
+主流程:
+  1. 接收订单+发件仓+包裹/SKU 明细，requestId+orderCode 幂等判断（重复直接返回上次结果）
+  2. 解析承运商范围（carrierStrategyCode 策略 / carrierIds 指定，二者不能同空）
+  3. 逐承运商逐仓计算运费（箱规校验 → 组包/发运重 → zone 映射 → 价卡公式 fee×(1+fuel_rate)）
+  4. 两层择优（承运商内部 calcMode 择优 isBest=2 → 全局最低 isBest=1）
+  5. 返回报价数组（requestId/orderCode 回显 + isBest 标记 + 排序）
+
+范围边界:
+  不覆盖:
+    - 推送真实链路（isPushWms=true → SCP/WMS/ERP 实际推送）
+    - bookingOrderId 申报运费计费分支（仅业务流程链路触发）
+    - 限流/并发/重试（需求声明不考虑）
+  依赖:
+    - lsp_scp 真实主数据: 仓库 BG03、承运商 CAR2025062611067266788(AU.TGE.PRIORITY.PRO) / CAR1772558358570467346(AU.TGE.PRIORITY)、价卡 lsp_carrier_rate、zone lsp_carrier_zone
+    - 金额断言一律用验证 SQL 现算现比（fee×(1+fuel_rate) 保留三位），禁止复制 §5 示例值做静态 golden（评审 4+补 断言口径）
+
+场景与原子能力:
+
+  M1_请求接入与幂等:
+    - 场景: S01
+      名称: 主流程合法请求返回报价
+      原子能力:
+        - id: AC-01
+          名称: 合法完整请求主流程成功
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: 无
+          验收: |
+            Given 有效主数据（BG03 仓库、真实承运商、可用价卡）
+            When  POST /quote/price_sync 携带完整必填字段（ownerId/orderCode/shipTo/warehouse/packages/items）与 carrierIds
+            Then  L1 HTTP 200；L2 requestId/orderCode 回显、code/msg/success=true、data 为数组且每行含 §3.2 全部字段且类型正确；L3 每承运商一条内部最优行，金额=round(fee×(1+fuel_rate),3)（SQL 现算）
+        - id: AC-02
+          名称: 响应契约——回显、排序、行级唯一键
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_scp 主数据]
+          待确认: 无
+          验收: |
+            Given 一次多承运商成功计费
+            When  检查响应包装与 data 数组
+            Then  requestId/orderCode 与入参一致；排序 isBest=1 行优先、其余按 shippingCost 升序；同一 requestId+orderCode 包装内 bookingCarrierId+calcMode 无重复行
+    - 场景: S02
+      名称: 幂等重放
+      原子能力:
+        - id: AC-03
+          名称: 相同 requestId+orderCode 重复请求返回上次结果
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_scp 主数据]
+          待确认: R-034(重复请求响应的 code/msg 形态未在 §6 落地)
+          验收: |
+            Given 同一 requestId+orderCode 已成功计费过一次
+            When  以完全相同 requestId+orderCode 再次请求
+            Then  不重新计费：返回与首次一致的结果（数据落库无新计费任务），无重复推送副作用
+        - id: AC-04
+          名称: 不同 requestId 同 orderCode 视为新请求
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据]
+          待确认: 无
+          验收: |
+            Given 某订单已用 requestId=X 计费成功
+            When  用 requestId=Y + 相同 orderCode 请求
+            Then  触发新计费（联合键不同=新请求），返回新生成结果
+    - 场景: S03
+      名称: 必填字段缺失
+      原子能力:
+        - id: AC-05
+          名称: 必填字段缺失被拒绝（ownerId/orderCode/shipTo/warehouse 分别缺失）
+          优先级: P2
+          可自动化: 是
+          依赖: []
+          待确认: R-002(错误码表无 4xx、message 全空，缺失场景预期 code/msg 未定义)
+          验收: |
+            Given 合法请求
+            When  分别去掉 ownerId / orderCode / shipTo / warehouse 提交
+            Then  返回参数校验失败（具体 code/msg【待确认 R-002】），不产生计费任务
+    - 场景: S04
+      名称: requestId 未传
+      原子能力:
+        - id: AC-06
+          名称: 不传 requestId 的行为
+          优先级: P2
+          可自动化: 是
+          依赖: []
+          待确认: R-049(未传时幂等与回显口径未定义，推定视为新请求直接计算)
+          验收: |
+            Given 合法请求但省略 requestId
+            When  提交
+            Then  【待确认 R-049】推定：视为新请求直接计算并返回；响应 requestId 回显口径待后端明确
+    - 场景: S05
+      名称: 字段长度边界
+      原子能力:
+        - id: AC-07
+          名称: 字符串字段长度上界通过/超界拒绝
+          优先级: P2
+          可自动化: 是
+          依赖: []
+          待确认: R-002(超长拒绝的 code/msg 未定义)
+          验收: |
+            Given 合法请求
+            When  requestId=64 字符 / orderCode=32 字符 / suburb=255 字符 等恰好上界值提交 → 应成功；
+                  各字段超界 1 字符提交 → 拒绝（预期 code/msg【待确认 R-002】）
+            Then  边界内不因长度误拒，超界有明确错误
+    - 场景: S06
+      名称: isPushWms / pushResultTo 组合
+      原子能力:
+        - id: AC-08
+          名称: 推送参数组合校验（不验证真实推送）
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据]
+          待确认: R-043(isPushWms 默认值、true+pushResultTo=0 组合、默认 100 与直调传 0 关系均未定义)
+          验收: |
+            Given 合法请求
+            When  组合提交 isPushWms(true/false/缺省) × pushResultTo(0/100/缺省)
+            Then  组合校验口径【待确认 R-043】；接口级不验证 SCP/WMS/ERP 真实推送结果
+  M2_承运商范围解析:
+    - 场景: S07
+      名称: carrierIds 指定多承运商
+      原子能力:
+        - id: AC-09
+          名称: 多承运商各自返回报价行
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: 无
+          验收: |
+            Given carrierIds 传 2 个有效承运商（PRO + 非 PRO）
+            When  请求计费
+            Then  data 含 2 行（每承运商一条内部最优），各自金额按各自价卡/fuel_rate 现算断言
+    - 场景: S08
+      名称: 策略编码计费
+      原子能力:
+        - id: AC-10
+          名称: carrierStrategyCode=quote_price 按策略关联承运商计费
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据, lsp_carrier_strategy_refs]
+          待确认: 无
+          验收: |
+            Given 策略 quote_price 关联 N 个承运商
+            When  仅传 carrierStrategyCode=quote_price（不传 carrierIds）
+            Then  data 覆盖策略关联的有效承运商集合（行数与 lsp_carrier_strategy_refs 一致）
+    - 场景: S09
+      名称: VIR 策略格式指定承运商
+      原子能力:
+        - id: AC-11
+          名称: VIR|carrierId|carrierId 格式解析
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据]
+          待确认: Q-022 已决策两种形式，但三段含义（第二/三段各是什么）无解释——建议设计时对齐
+          验收: |
+            Given carrierStrategyCode=VIR|<carrierId>|<carrierId>
+            When  请求计费
+            Then  按指定承运商计费返回对应报价行
+    - 场景: S10
+      名称: 策略与承运商同空
+      原子能力:
+        - id: AC-12
+          名称: carrierStrategyCode 与 carrierIds 同时为空被拒绝
+          优先级: P2
+          可自动化: 是
+          依赖: []
+          待确认: R-002(拒绝的 code/msg 未定义)
+          验收: |
+            Given 两者均不传
+            When  提交
+            Then  返回错误（预期 code/msg【待确认 R-002】），不产生计费任务
+    - 场景: S11
+      名称: carrierIds 含不存在的承运商 ID
+      原子能力:
+        - id: AC-13
+          名称: 不存在承运商 ID 的处理
+          优先级: P2
+          可自动化: 是
+          依赖: []
+          待确认: R-046(与"无价卡静默跳过"是否同口径未定义)
+          验收: |
+            Given carrierIds 混合 1 个存在 + 1 个不存在的 ID
+            When  请求计费
+            Then  处理口径【待确认 R-046】：推定按无价卡口径跳过（data 无该行）或报错，需后端拍板后固化断言
+  M3_运费计算引擎:
+    - 场景: S12
+      名称: 单仓单包裹单 SKU（包裹层有值）
+      原子能力:
+        - id: AC-14
+          名称: 一票一件计费公式
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: 无
+          验收: |
+            Given 单包裹单 SKU、包裹层尺寸/重量有值（如 §4 示例）
+            When  请求计费
+            Then  calcMode=1；称重向上取整选价卡段；shippingCost=round(fee×(1+fuel_rate),3)，fee/fuel_rate 由 SQL 按实查 zone 段取
+    - 场景: S13
+      名称: 包裹层尺寸为 0 单 SKU
+      原子能力:
+        - id: AC-15
+          名称: 包裹层 0 时取 SKU 箱规
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: 无
+          验收: |
+            Given 包裹层 length/width/height/weight=0、单 SKU 尺寸重量有值
+            When  请求计费
+            Then  发运重与箱规取 SKU 层值，计费结果与直接按 SKU 箱规计算一致
+    - 场景: S14
+      名称: 包裹层 0 多 SKU 组包
+      原子能力:
+        - id: AC-16
+          名称: 组包规则（长=max/宽=max/高=累加/重=累加/三维降序重排）
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: R-050(累加基数未确认——按 SKU 明细行还是按 qty 折算，§4 重量 2.3=2×1.15 暗示按 qty 折算)
+          验收: |
+            Given 包裹层为 0、同一包裹含多个 SKU（或同 SKU qty>1）
+            When  请求计费
+            Then  组包后箱规=三维降序重排(max长, max宽, Σ高)+Σ重（累加基数【待确认 R-050】），按最终箱规选价卡段计费；结果可由规则手工复算核对
+    - 场景: S15
+      名称: 多包裹计费
+      原子能力:
+        - id: AC-17
+          名称: 多包裹逐个计费运费求和
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: 无
+          验收: |
+            Given warehouse 下 2 个包裹（各自有尺寸重量）
+            When  请求计费
+            Then  shippingCost=Σ(每包裹独立计费结果)，每包裹按自身箱规/称重选段
+    - 场景: S16
+      名称: 称重档位（首重/续重分界）
+      原子能力:
+        - id: AC-18
+          名称: 称重 ≤5kg 取 Basic 首重 fee
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: 无
+          验收: |
+            Given 称重向上取整后 ≤5kg（如 2.3kg→3kg 档）
+            When  请求计费
+            Then  基础运费=lsp_carrier_rate.fee（Basic 段），shippingCost=fee×(1+fuel_rate)
+        - id: AC-19
+          名称: 称重 >5kg 叠加续重
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: 无
+          验收: |
+            Given 称重向上取整后 >5kg（如 5.1kg→6kg）
+            When  请求计费
+            Then  基础运费=fee+(称重-5)×per_kilogram_fee，shippingCost=基础运费×(1+fuel_rate)
+    - 场景: S17
+      名称: zone 映射与价卡段选择
+      原子能力:
+        - id: AC-20
+          名称: 派件 postcode→zone→价卡段
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_carrier_zone, lsp_carrier_rate, 验证SQL]
+          待确认: 无
+          验收: |
+            Given 派件地址 suburb+state+postcode（如 Haymarket NSW 2000）
+            When  请求计费
+            Then  命中价卡段与 SQL 按 lsp_carrier_zone 实查 zone 后在 lsp_carrier_rate 查得的段一致（不同承运商 zone 划分独立校验）
+    - 场景: S18
+      名称: 箱规边界恰好可发
+      原子能力:
+        - id: AC-21
+          名称: 最长边=120cm / 三边和=120cm / 称重=22kg 边界可发
+          优先级: P2
+          可自动化: 是
+          依赖: [lsp_scp 主数据]
+          待确认: 无
+          验收: |
+            Given 包裹尺寸/称重恰好等于限制值（120/120/22）
+            When  请求计费
+            Then  正常计费不拦截（≤ 为可发）
+    - 场景: S19
+      名称: 超箱规
+      原子能力:
+        - id: AC-22
+          名称: 多承运商场景超箱规承运商被过滤
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据]
+          待确认: 无
+          验收: |
+            Given carrierIds 传 2 个承运商，其中 1 个构造超箱规包裹
+            When  请求计费
+            Then  超箱规承运商不出现在 data（或该 calcMode 不参与），另一承运商正常报价
+        - id: AC-23
+          名称: 仅一个承运商且超箱规给出错误提示
+          优先级: P1
+          可自动化: 是
+          依赖: []
+          待确认: R-027(错误提示的 code/msg 形态未定义，未列入 §6)
+          验收: |
+            Given 仅传 1 个承运商且包裹超箱规
+            When  请求计费
+            Then  返回错误提示（预期 code/msg【待确认 R-027】）
+    - 场景: S20
+      名称: PO Box 地址检查
+      原子能力:
+        - id: AC-24
+          名称: closePoboxCheck=200 邮筒地址只走澳邮
+          优先级: P1
+          可自动化: 是
+          依赖: [澳邮(AU Post)承运商主数据, PO Box 测试地址, gotcha_001 大小写/标点变体]
+          待确认: 无
+          验收: |
+            Given 派件地址为 PO Box 变体（大小写/标点，参照 gotcha_001）且 closePoboxCheck=200
+            When  请求计费
+            Then  非澳邮承运商不返回该地址报价（或按澳邮渠道处理，以实际主数据为准）；地址断言覆盖 L3
+        - id: AC-25
+          名称: closePoboxCheck=100 或缺省不拦截邮筒地址
+          优先级: P2
+          可自动化: 是
+          依赖: [承运商主数据, PO Box 测试地址]
+          待确认: 无
+          验收: |
+            Given 同一 PO Box 地址、closePoboxCheck=100 或缺省
+            When  请求计费
+            Then  按策略与指定承运商正常计算，不做邮筒过滤
+    - 场景: S21
+      名称: 金额精度
+      原子能力:
+        - id: AC-26
+          名称: 金额四舍五入保留三位小数
+          优先级: P2
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: 无
+          验收: |
+            Given 构造 fee×(1+fuel_rate) 产生超过三位小数的价卡组合
+            When  请求计费
+            Then  shippingCost 恰为三位小数且等于 round(公式值,3)
+  M4_两层择优:
+    - 场景: S22
+      名称: 承运商内部择优
+      原子能力:
+        - id: AC-27
+          名称: calcMode=1/2 取低者为内部最优 isBest=2
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 多包裹/多 SKU 夹具(使两种 calcMode 结果不同), 验证SQL]
+          待确认: 无
+          验收: |
+            Given 构造同一承运商一票一件与一票多件金额不同的包裹组合
+            When  请求计费
+            Then  该承运商仅一条内部最优行，金额=两种 calcMode 较低者
+    - 场景: S23
+      名称: 全局择优
+      原子能力:
+        - id: AC-28
+          名称: 全局最低标记 isBest=1 且唯一
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_scp 主数据, 验证SQL]
+          待确认: 无
+          验收: |
+            Given 多承运商各自内部最优金额不同
+            When  请求计费
+            Then  data 中 isBest=1 恰一行、为全局最低 shippingCost；其余行 isBest=2
+    - 场景: S24
+      名称: canShipping=false 处理
+      原子能力:
+        - id: AC-29
+          名称: 一票多件超箱规不参与内部择优
+          优先级: P1
+          可自动化: 是
+          依赖: [lsp_scp 主数据]
+          待确认: R-021(canShipping=false 的行是否出现在 data[] 两处口径矛盾)
+          验收: |
+            Given 承运商一票多件结果超箱规（canShipping=false）、一票一件正常
+            When  请求计费
+            Then  内部择优仅取 calcMode=1；canShipping=false 行是否出现在 data 按【待确认 R-021】结论固化断言
+  M5_异常与容错:
+    - 场景: S25
+      名称: 承运商无价卡
+      原子能力:
+        - id: AC-30
+          名称: 无价卡承运商不返回报价行，其余正常比价
+          优先级: P0
+          可自动化: 是
+          依赖: [lsp_scp 主数据]
+          待确认: 无（R-037 已闭环：data 中不出现该行）
+          验收: |
+            Given carrierIds 传 2 个承运商，其中 1 个无有效价卡
+            When  请求计费
+            Then  data 无该承运商行（整体不出现），另一承运商正常返回；不报整单错误
+    - 场景: S26
+      名称: 承运商计费超时
+      原子能力:
+        - id: AC-31
+          名称: 单个承运商超时整单报错
+          优先级: P2
+          可自动化: 待定(需承运商故障注入/Mock, 当前环境不具备)
+          依赖: [故障注入手段【待确认 R-032 超时是否被承运商级 nacos 覆盖】]
+          待确认: R-032(整单报错的具体 code/响应形态未定义)
+          验收: |
+            Given 某承运商询价超时（>30s 或承运商级配置）
+            When  请求计费
+            Then  整单报错（预期 code/形态【待确认】），不返回部分结果
+    - 场景: S27
+      名称: 仓库/策略主数据不存在
+      原子能力:
+        - id: AC-32
+          名称: warehouseCode 不存在 / 策略编码不存在的处理
+          优先级: P2
+          可自动化: 是
+          依赖: []
+          待确认: R-046(主数据引用缺失口径未定义——500 还是参数错误)
+          验收: |
+            Given warehouseCode 传不存在的编码（或策略编码不存在）
+            When  请求计费
+            Then  处理口径【待确认 R-046】后固化断言（推定 500 计算失败）
+    - 场景: S28
+      名称: 多仓计费
+      原子能力:
+        - id: AC-33
+          名称: 多仓成功场景计费与结果结构
+          优先级: P1
+          可自动化: 是
+          依赖: [≥2 个有效仓库主数据, 验证SQL]
+          待确认: R-029(多仓成功 data 结构未定义——每仓独立 isBest 还是全局一个 isBest=1)
+          验收: |
+            Given warehouse 数组传 2 个有效仓库
+            When  请求计费
+            Then  按仓生成计费任务；data 结构与 isBest 分布按【待确认 R-029】结论固化
+        - id: AC-34
+          名称: 多仓一仓失败整单失败
+          优先级: P2
+          可自动化: 是
+          依赖: [≥2 个仓库主数据, 1 个可构造失败的仓库]
+          待确认: R-002(整单失败的 code/msg 形态)
+          验收: |
+            Given 2 个仓库其中 1 个无法计费（如无价卡以外的失败形态）
+            When  请求计费
+            Then  整单计费失败（预期 code/msg【待确认 R-002】）
+    - 场景: S29
+      名称: 鉴权
+      原子能力:
+        - id: AC-35
+          名称: 无 Token / 无效 Token 被拒绝
+          优先级: P1
+          可自动化: 是
+          依赖: []
+          待确认: R-005(Authorization 头、Token 获取方式、401 vs 403 语义未定义)
+          验收: |
+            Given 不携带 Authorization 或携带无效 Bearer Token
+            When  请求计费
+            Then  鉴权拒绝（预期状态码与响应体【待确认 R-005】），不产生计费任务
+
+待确认清单:
+  # 编号沿用评审记录 R-xxx / 存量 Q-xxx，避免重复编号
+  高优先级(闭环前不进入 design-testcases):
+    - id: R-002
+      项: 错误码表 message 全空、无 4xx、无重复请求分支
+      影响_AC: [AC-05, AC-07, AC-12, AC-23, AC-34]
+      责任方: 后端
+    - id: R-021
+      项: canShipping=false 的行是否出现在 data[]
+      影响_AC: [AC-29]
+      责任方: 后端
+    - id: R-029
+      项: 多仓成功场景 data 结构与 isBest 分布
+      影响_AC: [AC-33]
+      责任方: 产品+后端
+    - id: R-034
+      项: 幂等规则落 §7 流程与 §6 分支（口径已确认，差文档落地+重复请求响应形态）
+      影响_AC: [AC-03]
+      责任方: 后端
+    - id: R-005
+      项: Authorization 头、Token 获取方式、401/403 语义
+      影响_AC: [AC-35]
+      责任方: 后端+运维
+  中优先级:
+    - { id: R-049, 项: requestId 未传行为与回显, 影响_AC: [AC-06], 责任方: 后端 }
+    - { id: R-050, 项: 组包累加基数(明细行 vs qty 折算), 影响_AC: [AC-16], 责任方: 产品+后端 }
+    - { id: R-043, 项: isPushWms/pushResultTo 默认值与组合矩阵, 影响_AC: [AC-08], 责任方: 产品+后端 }
+    - { id: R-046, 项: 主数据引用不存在口径(承运商/仓库/策略), 影响_AC: [AC-13, AC-32], 责任方: 后端 }
+    - { id: R-027, 项: 仅一承运商超箱规错误提示形态, 影响_AC: [AC-23], 责任方: 产品+后端 }
+    - { id: R-035, 项: code 是业务码还是 HTTP 码, 影响_AC: [AC-01, AC-02], 责任方: 后端 }
+    - { id: R-015, 项: shippingType 枚举完整性(缺 400/500), 影响_AC: [AC-01], 责任方: 产品 }
+    - { id: Q-008, 项: shipmentType 合法取值清单, 影响_AC: [AC-01], 责任方: 产品 }
+    - { id: Q-009, 项: country 是否仅支持 AU, 影响_AC: [AC-01], 责任方: 产品 }
+    - { id: Q-010, 项: tc/tp/hasMore 字段含义, 影响_AC: [AC-02], 责任方: 后端 }
+  低优先级:
+    - { id: R-017, 项: tc/tp/hasMore 明细(同 Q-010), 影响_AC: [AC-02], 责任方: 后端 }
+    - { id: R-032, 项: 30s 超时是否被承运商级 nacos 覆盖, 影响_AC: [AC-31], 责任方: 后端 }

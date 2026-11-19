@@ -156,6 +156,13 @@ module_registry:
         config_path: config/lsp_quote/
         test_path: tests/lsp_quote/pricing/
 
+      # REQ-002 /quote/price_sync：目标为 SCP 环境真实承运商（AU.TGE.*），非 carrier_a/b 假数据
+      quote_price:
+        current_version: v1.1
+        config_path: config/lsp_quote/
+        test_path: tests/lsp_quote/quote_price/
+        requirement_id: REQ-002
+
   lsp_booking:
     description: 物流申报/下单
     carriers: [carrier_a, carrier_b]

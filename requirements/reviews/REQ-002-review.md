@@ -1,206 +1,186 @@
 ---
 requirement_id: REQ-002
-review_id: REV-REQ-002-001
+review_id: REV-REQ-002-004
 reviewer: 需求评审（review-requirements）
-review_date: 2026-11-18
+review_date: 2026-11-19
 target: requirements/docs/REQ-002_quote_price_sync.md
-source_spec: requirements/specs/lsp_quote/quote_price/all.v1.0.0.json
 input_mode: B-1
-gate: reject
-blocking_count: 4
-next_action: 回退 requirement-enrichment 补齐 R-001 ~ R-004 后复审
+gate: conditional-pass
+blocking_count: 0
+next_action: 进入 split-requirements（REQ-002 功能拆分）；高级 6 项（R-002/R-005/R-020/R-021/R-029/R-034）与中项 R-049/R-050 pass-through，用例设计时逐条处理
+base_review: REV-REQ-002-003 (2026-11-19 pass)
 ---
 
-# REQ-002 需求评审记录 — 承运商运费计算同步接口
+# REQ-002 需求评审记录（第 4 轮）
 
 ## 1. 评审对象与结论摘要
 
 | 项 | 内容 |
 |---|---|
-| 评审对象 | `POST /quote/price_sync` 承运商运费计算同步接口 |
-| 需求文档 | `requirements/docs/REQ-002_quote_price_sync.md` |
-| 接口快照 | `requirements/specs/lsp_quote/quote_price/all.v1.0.0.json`（OpenAPI 3.0.1，1 个 path，7 个 schema） |
-| 上游待确认清单 | `requirements/changes/REQ-002-pending.md`（M 14 项 / Q 21 项） |
-| 评审方法 | 结构盘点 + 逻辑闭环 / 边界异常 / 数据一致性 / 可测试性 四维破坏性审查 |
-| 问题数量 | 高 11、中 9、低 2，共 22 项 |
-| 门禁结论 | **[拒绝 Reject]**，4 个阻塞项未闭环 |
+| 评审轮次 | 第 4 轮，上一轮 REV-REQ-002-003 / 2026-11-19 / pass |
+| 本轮对象 | 文档与第 3 轮评审时**完全一致**（最后变更 commit 82e46b0，2026-11-18 19:28，之后无修改） |
+| 门禁结论 | **[Reject]** — 3 个阻塞级（均为本轮深挖新发现，非文档回退） |
+| 对比上一轮 | 阻塞 0 → **3**；本轮闭环 R-037；R-027 高→中（行为拆分已定义）；R-021 中→高（升级） |
+| 本轮新发现 | R-040 ~ R-048 共 9 项：阻塞 3 / 中 4 / 低 2 |
+| 已闭环项复核 | R-013（回显+唯一键）、R-033（extra_fee 不参与计算）、R-008（示例类型）、R-036（标点）在当前文档中**均维持闭环状态**，回填修复时不得回退这些内容 |
+| 本轮闭环 | **R-037**（无价卡承运商 → data 中不出现该行；§5 备注"整体不出现"与 §7"不返回此承运商计费信息"口径一致） |
 
-## 2. 结构盘点
+> **4+补（2026-11-19）**：用户答复 R-040 / R-041 / R-042，3 个阻塞项全部闭环，门禁改判 **[有条件通过]**，详见「4+补 用户答复闭环记录」。
 
-| 检查项 | 结果 | 证据 |
+## 2. 结构盘点（第 4 轮复核）
+
+| 检查项 | 结果 | 证据（章节/字段） |
 |---|---|---|
-| 必填字段 | 不通过 | `QuoteTaskDto.required` = ownerId / orderCode / shipTo / warehouse，缺 `carrierStrategyCode`（描述含 `@NotBlank`）；`requestBody` 未声明 `required: true` |
-| 命名风格 | 部分通过 | 请求响应均为 camelCase，无 snake_case 混用；响应存在 `tc` / `tp` / `hasMore` 无含义缩写（见 R-017） |
-| 基础设施 | 不通过 | `servers: []`、`security: []`；无 `example` / `examples`；`responses` 仅 200 且 `description` 为空 |
-| 枚举值 | 不通过 | `pushResultTo` 的 `enum` 为空数组；`shippingType` / `closePoboxCheck` / `calcMode` / `isBest` 无 `enum` |
-| 错误定义 | 不通过 | `components.responses` 与 `components.securitySchemes` 均为空对象 |
-| 文档元信息 | 不通过 | `info.description` 为 "Lsp Backend API Documentation"，`tags` 为 `test/*`，`info.version=1.0` 是文档版本而非接口版本 |
+| 必填字段 | **不通过** | §2.2 `requestId` 标"否"，但 §1 幂等规则以 `requestId+orderCode` 为幂等键——不传 requestId 时幂等行为未定义（R-040）；spec `QuoteTaskDto.required=[ownerId,orderCode,shipTo,warehouse]` 同样不含 requestId，与幂等规则矛盾一致存在；`requestBody.required` 仍未声明（R-020/Q-020 沿用，本轮 spec 复查确认 NOT SET） |
+| 命名风格 | 通过（附 1 项类型问题） | 请求/响应字段均为 camelCase，无混用；但 `bookingCarrierCalc`(string "1") 与 `calcMode`(integer 1) 同义不同型（R-045） |
+| 基础设施 | **部分通过** | §1 声明 Bearer Token，但 §2.1 请求头表仅有 Content-Type 一行，无 Authorization 行；Token 获取方式仍缺失（R-005 沿用）；servers 按 Q-003 决策走 SCP 环境可接受 |
+| 枚举值 | **部分通过** | calcMode/isBest/closePoboxCheck/pushResultTo 已有含义说明；`shippingType` 仍缺 400/500（R-015 沿用）；`shipmentType` 仍无取值清单（Q-008 未闭环）；spec 侧 `pushResultTo` 仍为空 `enum: []`、响应 `isBest` 仍带 `default: 2`（R-016/R-019 沿用，本轮 spec 复查确认） |
 
 ## 3. 漏洞清单
 
-### 3.1 高级（不解决无法设计用例或断言必然出错）
+### 3.1 阻塞级（3 项，均为本轮新发现）
 
-| 编号 | 级别 | 位置 | 问题 | 修改建议 | 责任方 |
-|---|---|---|---|---|---|
-| R-001 | 高 | §1 接口概览、§7 业务规则 | 业务背景、调用方、使用场景、调用链路缺失，正文只能用"推测"表述 | 补「业务背景与使用场景」：触发时机、上游系统、下游动作、是否与申报/推送联动；确认后删除对应"推测" | 产品 |
-| R-002 | 高 | §6 错误码 | 错误码表为空，响应只定义 200，异常场景无预期结果 | 至少覆盖 6 类：缺少必填字段、`carrierStrategyCode` 格式错误、策略不存在/已禁用、承运商询价超时、无可承运承运商、推送失败；每行补 HTTP 状态 / code / message / 触发条件 | 后端 |
-| R-003 | 高 | §7 业务规则 | 计费公式、比价择优、PO Box 检查、地址校验规则全部缺失，主流程金额无法计算 | 改为规则表（规则ID / 名称 / 输入 / 判定 / 输出 / 异常），至少含体积重系数来源、计费重取值、附加费项、比价排序、PO Box 命中处理 | 产品 + 后端 |
-| R-004 | 高 | §3.2 报价项 | 全部金额字段无币种、精度、是否含税；`shippingCostWithTax` 无税率来源 | 每个金额字段补「币种 / 精度 / 含税口径 / 取整规则」；补税率来源（系统配置还是按国家/州） | 产品 + 后端 |
-| R-005 | 高 | §2.2 `carrierStrategyCode` | 描述含 `@NotBlank`，但 `required` 数组未列，必填用例预期不确定 | 以注解为准：`required` 加入 `carrierStrategyCode`，文档必填列写"是（注解强制）" | 后端 |
-| R-006 | 高 | §2.2 `pushResultTo` | `enum: []` 空数组与描述 0/100/200/300 冲突，合法值/非法值用例无法判定 | 删除空 `enum` 或补 `[0,100,200,300]`，并写明其他取值是否报错、报什么 | 后端 |
-| R-007 | 高 | §3.2 报价项 | 响应不回显 `requestId` / `orderCode`；`data` 无排序规则、无报价唯一标识 | 响应包装加 `requestId` / `orderCode` 回显；`data` 写明排序规则；补报价唯一键供定位 | 后端 |
-| R-008 | 高 | §2.2 `carrierStrategyCode` / `carrierIds` | 两字段是二选一、可并用还是有优先级，均未定义 | 补参数组合矩阵：只传 A / 只传 B / 都传 / 都不传，各自结果与错误码 | 产品 + 后端 |
-| R-009 | 高 | §1 接口概览、§2.1 请求头 | 无环境地址、无鉴权方式，鉴权与越权用例无法设计 | 补 dev / staging / prod 地址、鉴权方式与 Token 获取路径、是否需租户或追踪头 | 后端 + 运维 |
-| R-010 | 高 | §2.2 `requestId` | 未声明是否幂等，重复提交预期未知 | 明确同 `requestId` 重复提交时：返回首次结果 / 重新计算 / 报错，以及标识保留时长 | 产品 + 后端 |
-| R-011 | 高 | §3.2 `canShipping` | `canShipping=false` 时金额字段返回 null / 0 / 缺失未定义；不可承运的承运商是否仍返回未定义 | 写明 false 时各字段取值，以及该条记录是否保留在 `data` 中 | 产品 + 后端 |
+| 编号 | 位置 | 问题 | 修改建议 | 责任方 |
+|---|---|---|---|---|
+| **R-040** | §2.2 / §1 | **`requestId` 标记非必填，但幂等规则依赖它**。§1："当 requestId+orderCode 联合唯一时为新请求，否则为重复"；§2.2 `requestId` 必填=否；spec `QuoteTaskDto.required` 亦不含它。若调用方不传 requestId：① 幂等判断如何执行（跳过？系统生成？）② §3.1 承诺"requestId 与请求入参回显一致"——回显什么？③ 重复请求判定口径完全悬空 | 二选一回填（见 §5.1 可粘贴文本）：若必填 → 改 §2.2 必填列并补 400 参数错误分支；若可选 → 补"系统自动生成 + 不做幂等判断 + 回显生成值"的明确规则 | 产品 + 后端 |
+| **R-041** | §7 计算规则 / §2.5 / §4 | **"组包规则："后无任何内容**（§7 "- 组包规则：" 冒号悬空）。§2.5 包裹尺寸"缺省时系统取 SKU 汇总**或自动组包**"；§4 示例包裹尺寸 30×20×15 与 2×SKU(15×10×8) 的推导关系无法验证。多 SKU / 包裹层为 0 的场景下：尺寸如何归并（长宽高各自怎么取）？重量是否 Σ(SKU weight×qty)？组包后箱规校验按什么单位做？——一票多件（calcMode=2）的核心计算规则缺失，该场景 expected value 无法计算 | 补全组包规则文本（问题清单与建议文本框架见 §5.2）。在规则落地前，所有多 SKU / 包裹层 0 值用例只能标 TODO | 产品 + 后端 |
+| **R-042** | §5 示例 / §4 | **示例 zone 映射与派件地址自相矛盾**。§4 shipTo 为 Sydney（NSW 2000, Haymarket），§5 却写"zone 映射：MEL → ADL"，remark 同为 "MEL->ADL / 1.001~3.0kg / fee=7.87 / fee=15.52"。ADL=Adelaide，与 NSW 2000 不符，疑似旧示例残留。若 fee=7.87/15.52 实际取自 MEL→ADL 价卡段，则 shippingCost=8.633/19.960 两个 golden 值全部不可信——用例设计若直接复用 §5 金额，自动化断言会整体写错 | ① 按 `lsp_carrier_zone` 实查 postcode 2000 的真实 zone；② 核对 fee=7.87/15.52 是否属于正确 lane 的价卡段；③ 修正 §5 映射描述与两处 remark 字符串（可粘贴文本见 §5.3）。核实前禁止将 §5 金额固化为断言 golden 值 | 后端 + 测试（DB 核对） |
 
-### 3.2 中级（可写用例但存在歧义）
+### 3.2 高级（6 项）
 
-| 编号 | 级别 | 位置 | 问题 | 修改建议 | 责任方 |
-|---|---|---|---|---|---|
-| R-012 | 中 | §2.2 `closePoboxCheck` | 描述称默认 200，schema 无 `default`；100/200 语义需确认 | schema 补 `default: 200` 与 `enum: [100,200]`，文档默认值列填 200 | 后端 |
-| R-013 | 中 | §2.2 `shippingType` / `shipmentType` | `shippingType` 描述列 100/200/300/600 缺 400/500；`shipmentType` 是 string 且无取值清单 | 补 `shippingType` 完整枚举；给出 `shipmentType` 合法取值或改为枚举类型 | 产品 |
-| R-014 | 中 | §2.2 ~ §2.6 | 字符串长度、数组上限（`warehouse` / `packages` / `items`）、数值上限缺失，边界用例无上限可测 | 数组补 `maxItems`，字符串补 `maxLength`，数值补 `maximum` | 后端 |
-| R-015 | 中 | §2.2 `bookingOrderId` | "申报运费计费时要传"判定条件模糊，不传时的行为未定义 | 写清触发条件与不传时的行为（忽略 / 报错 / 走默认） | 产品 |
-| R-016 | 中 | §2.6 `cube` / `cubeWeight` | 同时出现在请求与计费逻辑中，无法判断是入参还是系统计算值 | 明确二者为入参（需校验）还是系统计算（请求中忽略） | 后端 |
-| R-017 | 中 | §3.1 响应包装 | `tc` / `tp` / `hasMore` 含义未知；同步接口出现 `hasMore` 不合理 | 补三字段含义；若同步返回全量则删除 `hasMore` | 后端 |
-| R-018 | 中 | §3.2 `isBest` / `choiceShippingCost` | 比价规则未定义，`isBest` 含义未知，默认值 2 出现在响应中不合理 | 明确 1/2 含义、比价口径（是否含税、是否含附加费）；移除响应字段的 `default` | 产品 |
-| R-019 | 中 | §9 依赖与数据影响 | 承运商询价依赖外部系统、`isPushWms` 推送副作用不可观测，缺 Mock 与降级约定 | 写明外部依赖、超时降级策略、推送结果的可查询途径（日志 / 查询接口 / 消息） | 后端 |
-| R-020 | 中 | §2.3 `country` | 传国家代码还是全称、是否只支持 AU 未定义 | 明确取值格式（建议 ISO 两位码）与支持范围 | 产品 |
+| 编号 | 位置 | 问题 | 修改建议 | 责任方 |
+|---|---|---|---|---|
+| R-002 | §6 错误码 | 仍是 2 行（200/500），message 列**两行均为空**（§5 示例中 msg="success" 未同步进表）；仍无 4xx 类（参数校验/鉴权失败/箱规超限"错误提示"用什么 code？）；"重复请求返回上次结果"也无对应分支 | 补 message 列与触发条件全集；至少覆盖：200 / 500 计算失败 / 箱规超限错误提示（R-027 场景二）/ 参数校验失败（R-040 场景） | 后端 |
+| R-005 | §1 / §2.1 | §2.1 请求头表无 Authorization 行；Token 获取 endpoint、必需头（租户/租户 ID）、401 vs 403 语义未定义 | §2.1 补 `Authorization: Bearer <token>` 行；补 Token 获取方式与失败码语义 | 后端 + 运维 |
+| R-020 | spec JSON | 本轮复查确认仍未同步：`maxLength` 全文仅 1 处、`requestBody.required` NOT SET、`pushResultTo` 空 `enum: []`、响应 `isBest` 带 `default: 2`、`closePoboxCheck` 无 enum/default | 按 §2 文档补齐 spec（maxLength/required/enum/default 四类） | 后端 |
+| R-021 | §3.2 / §5 | **升级（中→高）**：本轮发现结构性矛盾——§3.2 断言"同一个包装内不会出现 bookingCarrierId 相同的多条 data[] 行（每承运商只保留内部最优）"，则 canShipping=false 的行**永远不会出现**，该字段成为死字段；但 §5 备注"当某承运商 canShipping=false 时该 calcMode 不参与本承运商内部择优"暗示该行存在。两种口径必有其一是错的，直接决定"一票多件超箱规"场景的断言写法（断行存在 vs 断行不存在） | 明确 canShipping=false 的 calcMode 结果是否出现在 data[]：若不出现 → 删除 §5 备注歧义并说明字段何时为 false；若出现 → 修改 §3.2 唯一性规则表述 | 后端 |
+| R-029 | §7 多仓 | 多仓成功场景 data 结构仍未明确：2 个 warehouse 时 data 是每仓独立 isBest，还是全局一个 isBest=1？无多仓响应示例 | 补 2 仓成功场景的响应示例（data 结构 + isBest 分布） | 产品 + 后端 |
+| R-034 | §7 / §6 | 幂等规则仅存在于 §1：§7 流程第 1-6 步无幂等判断步骤；§6 无"重复请求"分支；重复请求响应的 code/msg/data 与新请求是否完全一致未说明 | §7 流程补第 2 步前插入"requestId+orderCode 幂等判断，命中直接返回上次结果"；§6 补重复请求分支及响应口径 | 后端 |
 
-### 3.3 低级（不影响主流程）
+### 3.3 中级（10 项）
 
-| 编号 | 级别 | 位置 | 问题 | 修改建议 | 责任方 |
-|---|---|---|---|---|---|
-| R-021 | 低 | §1 接口概览 | 调用方、调用频率为推测内容，影响回归范围判断 | 补调用方与触发频率，或删除这两行 | 产品 |
-| R-022 | 低 | §1 / §10 | `tags` 为 `test/*` 前缀；`info.version=1.0` 是文档版本；变更记录为空 | 改正式分组，补接口版本号与首条变更记录 | 后端 |
+| 编号 | 位置 | 问题 | 修改建议 | 责任方 |
+|---|---|---|---|---|
+| R-014 | §1 tags | 分组仍为 `test/*` 前缀 | Apifox 改正式分组 | 后端 |
+| R-015 | §2.2 shippingType | 枚举仍缺 400/500 | 补齐或注明"仅支持列出的 4 种" | 产品 |
+| R-016 | spec closePoboxCheck | 仍无 default/enum（本轮 spec 复查确认） | spec 补 `enum: [100,200]`、`default: 200` | 后端 |
+| R-019 | spec isBest | 响应 schema 仍带 `default: 2`（本轮 spec 复查确认） | 删除响应默认值 | 后端 |
+| R-027 | §7 箱规 | **降级（高→中）**：行为拆分已定义（多承运商超箱规→过滤不参与；仅此承运商→错误提示），残留问题=场景二"错误提示"的 code/msg 形态未定义，且未列入 §6 触发条件 | 场景二错误提示补 code/msg 定义，并入 §6 错误码表 | 产品 + 后端 |
+| R-035 | §3.1 / §5 / §6 | code 语义未定：§3.1 称"业务状态码"，取值 200/500 形似 HTTP 码；§6 表亦用 200/500 | 明确为业务码并在 §6 给出完整业务码清单，或注明"code 即 HTTP 语义映射" | 后端 |
+| **R-043**（新） | §2.2 isPushWms / pushResultTo | ① isPushWms 无默认值（省略时按 true 还是 false？）；② `isPushWms=true` + `pushResultTo=0`（0=不推送）组合矛盾未定义；③ pushResultTo 默认 100 与"接口直调传 0"的适用关系未说明（原 Q-011 未闭环项本轮转正入册） | §2.2 补 isPushWms 默认值= false；补组合矩阵：isPushWms=true 时 pushResultTo 必须 ∈ {100,200,300}，传 0 报参数错误（或按后端实际口径） | 产品 + 后端 |
+| **R-044**（新） | §5 响应示例 remark | 两处 remark 字符串仍含 "extra=5.0"，与 R-033 已闭环决策（extra_fee 不参与计算、无附加费）矛盾——remark 是否固定包含 extra 段、段值取 DB 原值还是 0，未定义 | 明确 remark 格式与取值来源；若展示 DB 原值需注明"extra 段仅为价卡原始值、不参与计算"，或直接改为与公式一致的 "fee=7.87 fuel=0.097" | 后端 |
+| **R-045**（新） | §3.2 / §5 | `bookingCarrierCalc`(string "1"/"2") 与 `calcMode`(integer 1/2) 同义枚举类型不一致，二层断言易写错类型 | 统一为 integer，或在 §3.2 注明"字符串为历史原因，断言按字符串比较" | 后端 |
+| **R-046**（新） | §7 / §6 | 主数据引用不存在的处理未定义：warehouseCode 不在 lsp_warehouse / carrierIds 含不存在的 ID / carrierStrategyCode 不存在——是静默跳过（按"无价卡"口径不返回该承运商？）、返回 500、还是参数校验报错？"无价卡"与"承运商 ID 不存在"是否同一口径？ | 按引用对象逐一补口径：建议 承运商 ID 不存在=按无价卡口径跳过（data 无该行）；仓库/策略不存在=500 计算失败；并同步进 §6 触发条件 | 后端 |
+
+### 3.4 低级（6 项）
+
+| 编号 | 位置 | 问题 |
+|---|---|---|
+| R-017 | §3.1 | tc/tp/hasMore 含义仍未明确（hasMore 仍标"推测"） |
+| R-032 | §8 | 30s 超时未明确是否被承运商级 nacos 配置覆盖（Q-023 同源） |
+| R-038 | §9 | `lsp_quote_task_address` / `lsp_quote_task_package` / `lsp_quote_task_package_sku` / `lsp_quote_task_log` 4 行仍缺反引号 |
+| R-039 | §10 编号 | 仍存在两个 `## 10.`（依赖影响 + 变更记录） |
+| **R-047**（新） | §3.2 vs §7 | surcharge 说明写"本轮新增承运商 AU.TGE.PRIORITY.PRO 无 RAS 类附加费"，§7 写"当前无 RAS 类附加费"（全局口径）——两处口径不一致，建议统一为"当前系统无 RAS 类附加费" |
+| **R-048**（新） | §2.5 / §2.6 | 数值上限未定义：qty 上限（DB smallint→32767？）、包裹/SKU 尺寸重量上限（仅箱规校验 120cm/22kg，入参校验是否拒绝负数/超上限未说明），超上限行为未定义 |
 
 ## 4. 进入下一步前必须澄清清单
 
 | 编号 | 问题 | 责任方 | 阻塞的用例类型 |
 |---|---|---|---|
-| R-001 | 业务背景与调用链路不明 | 产品 | 正常流程边界、验收口径 |
-| R-002 | 无错误码与错误响应 | 后端 | 全部异常用例 |
-| R-003 | 计费、比价、PO Box、地址校验规则缺失 | 产品 + 后端 | 主流程金额断言、附加费、PO Box |
-| R-004 | 金额币种 / 精度 / 税口径缺失 | 产品 + 后端 | 全部金额断言 |
-| R-005 | `carrierStrategyCode` 必填冲突 | 后端 | 必填校验 |
-| R-006 | `pushResultTo` 枚举与描述冲突 | 后端 | 枚举合法值 / 非法值 |
-| R-007 | 响应无回显、无排序、无唯一标识 | 后端 | 结果归属断言、最优项定位 |
-| R-008 | 策略编码与 `carrierIds` 关系不明 | 产品 + 后端 | 参数组合矩阵 |
-| R-009 | 无环境地址与鉴权方式 | 后端 + 运维 | 鉴权、越权、连通性 |
-| R-010 | 幂等未定义 | 产品 + 后端 | 重复提交 |
-| R-011 | 不可承运分支返回形态未定义 | 产品 + 后端 | `canShipping=false` 分支 |
-| R-012 ~ R-020 | 见漏洞清单 | 产品 / 后端 | 默认值、枚举覆盖、边界值、依赖与副作用 |
+| **R-040** | requestId 是否必填；不传时幂等与回显口径 | 产品 + 后端 | 幂等场景、负向参数用例 |
+| **R-041** | 多 SKU 重新组包规则（尺寸归并/重量合成/组包后箱规校验） | 产品 + 后端 | 多 SKU、包裹层 0 值、calcMode=2 金额断言 |
+| **R-042** | §5 示例 zone 映射 MEL→ADL 与 shipTo Sydney 的矛盾；fee=7.87/15.52 所属 lane 核实 | 后端 + 测试 | 全部金额 golden 值固化 |
+| R-002 | 错误码 message 全空、无 4xx、无重复请求分支 | 后端 | 全部异常分支断言 |
+| R-005 | Authorization 头、Token 获取、401/403 | 后端 + 运维 | 鉴权用例 |
+| R-020 | spec JSON 与文档同步 | 后端 | schema 层断言 |
+| R-021 | canShipping=false 行是否出现在 data[] | 后端 | 一票多件超箱规分支断言 |
+| R-029 | 多仓成功场景 data 结构 | 产品 + 后端 | 多仓场景断言 |
+| R-034 | 幂等流程写入 §7、重复请求分支写入 §6 | 后端 | 幂等场景用例 |
+| R-043 | isPushWms 默认值与 pushResultTo 组合矩阵 | 产品 + 后端 | 推送组合与错误分支 |
+| R-046 | 主数据引用不存在（仓库/承运商/策略）处理口径 | 后端 | 主数据负向用例 |
 
 ## 5. 具体修改内容
 
-### 5.1 §2.2 请求体：修必填与枚举（对应 R-005、R-006）
+### 5.1 §2.2 requestId — R-040（二选一）
 
-现状：`carrierStrategyCode` 不在 `required`；`pushResultTo` 的 `enum` 是空数组。
+- 现状：`| requestId | string | 否 | **max 64**（DB lsp_quote_task.request_id varchar(64)） | — | 请求唯一 ID |`
+- 改为（若后端确认必填）：
 
-改为：
-
-```json
-"required": ["ownerId", "orderCode", "carrierStrategyCode", "shipTo", "warehouse"]
+```markdown
+| requestId | string | 是 | **max 64**（DB `lsp_quote_task.request_id varchar(64)`）；缺失返回 400 参数校验错误 | — | 请求唯一 ID（幂等键组成部分） |
 ```
 
-```json
-"pushResultTo": {
-  "type": "integer",
-  "description": "设置结果推送：0 不推送 | 100 SCP | 200 WMS | 300 ERP",
-  "enum": [0, 100, 200, 300],
-  "default": 100
-}
+- 改为（若后端确认可选）：
+
+```markdown
+| requestId | string | 否 | **max 64**（DB `lsp_quote_task.request_id varchar(64)`） | 系统自动生成 | 请求唯一 ID（幂等键组成部分）；未传时系统自动生成并在响应回显，该请求不做重复判断 |
 ```
 
-文档 §2.2 对应两行改为：
+### 5.2 §7 组包规则 — R-041
 
-| 字段 | 类型 | 必填 | 约束 | 默认值 | 说明 |
-|---|---|---|---|---|---|
-| carrierStrategyCode | string | 是 | 规则：`VIR\|carrierId\|carrierId` | — | 物流策略编码 |
-| pushResultTo | integer | 否 | 0 不推送 \| 100 SCP \| 200 WMS \| 300 ERP | 100 | 设置结果推送 |
+- 现状：`- 组包规则：`（冒号后无内容）
+- 改为（框架文本，空格处由产品/后端拍板回填）：
 
-### 5.2 §6 错误码：先定覆盖范围，code 待后端填（对应 R-002）
+```markdown
+	- 组包规则（包裹层尺寸为 0 或缺失时，由包裹内 SKU 重新组包）：
+		1. 组包粒度：___（逐 SKU 独立成虚拟包裹 / 合并为一个虚拟包裹）
+		2. 尺寸归并：长=___，宽=___，高=___（如各取最大 / 同向叠加 / 三维排序装箱）
+		3. 组包后重量 = Σ(SKU weight × qty)，保留三位小数
+		4. 组包产生的每个虚拟包裹分别按箱规限制（最长边≤120cm、三边和≤120cm、≤22kg）校验，超限处理方式同 §7 箱规规则
+```
 
-| HTTP | code | message | 触发条件 | 处理建议 |
-|---|---|---|---|---|
-| 400 | 待填 | 待填 | `ownerId` / `orderCode` / `shipTo` / `warehouse` 缺失 | 修正请求后重试 |
-| 400 | 待填 | 待填 | `carrierStrategyCode` 格式不符合 `VIR\|carrierId\|carrierId` | 从策略列表接口重新获取 |
-| 400 | 待填 | 待填 | 策略不存在或已禁用 | 更换策略编码 |
-| 200 / 504 | 待填 | 待填 | 承运商询价超时 | 重试或减少承运商范围 |
-| 200 | 待填 | 待填 | 所有承运商均不可承运 | 检查地址与包裹信息 |
-| 200 | 待填 | 待填 | 推送 SCP / WMS / ERP 失败 | 人工补偿或重新推送 |
+- 同时需回答：§4 示例包裹尺寸 30×20×15 由 2×SKU(15×10×8) 按哪条规则推导得出。
 
-> 注意：`code` 是 HTTP 状态码还是响应体 `code` 字段，需要同时写明（见 R-017、Q-002）。
+### 5.3 §5 zone 映射与 remark — R-042 / R-044
 
-### 5.3 §3.2 报价项：补回显、排序与唯一标识（对应 R-007）
+- 现状：`> 重量 2.3kg → 向上取整 3kg；zone 映射：MEL → ADL（需按 carrier_zone 表映射），对应价卡段均为 1.001 ≤ w ≤ 3.0`
+- 改为（核实后回填真实 zone 与 lane）：
 
-建议在 `RestResultListQuotePriceSyncVo` 增加：
+```markdown
+> 重量 2.3kg → 向上取整 3kg；发件仓 BG03（MEL）→ 派件 postcode 2000（SYD），zone 映射：2000 → ___（按 lsp_carrier_zone 实查），对应价卡段均为 1.001 ≤ w ≤ 3.0
+```
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| requestId | string | 回显请求 ID，用于断言结果归属 |
-| orderCode | string | 回显订单号 |
+- remark 两处 `"MEL->ADL / 1.001~3.0kg / fee=7.87 extra=5.0 fuel=0.097"` 改为：`"MEL->SYD / 1.001~3.0kg / fee=7.87 fuel=0.097"`（fee 值需按核实后的正确 lane 重新确认）。
 
-并补充：`data` 排序规则（建议 `isBest=1` 优先，其次 `shippingCost` 升序，需产品确认）；若同一承运商可能返回多条，需补报价唯一键。
+### 5.4 §9 表名反引号 / §10 编号 — R-038 / R-039（低，可随手修）
 
-### 5.4 §3.2 金额与不可承运分支（对应 R-004、R-011）
-
-金额表头改为带口径的形式：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| shippingCost | number | 运费，币种待确认（业务为澳洲地址，推测 AUD），2 位小数，不含税 |
-| shippingCostWithTax | number | 含税运费，税率来源待确认（国家 / 州 / 系统配置） |
-| surcharge | number | 附加费，构成项（偏远 / 燃油 / 其他）待确认 |
-| choiceShippingCost | number | 比价运费，比价口径（是否含税、是否含附加费）待确认 |
-
-补充一段：`canShipping=false` 时 `shippingCost` / `choiceShippingCost` / `shippingCostWithTax` / `surcharge` 返回 null（而不是 0），该条记录保留/不保留在 `data` 中（待产品确认）。
-
-### 5.5 §7 业务规则：从叙述改成规则表（对应 R-003）
-
-| 规则ID | 规则名 | 输入 | 判定 / 计算 | 输出 | 异常 |
-|---|---|---|---|---|---|
-| RULE-01 | 策略解析 | `carrierStrategyCode` / `carrierIds` | 待补：二选一还是并集、优先级 | 承运商候选集 | 无候选时报错 |
-| RULE-02 | 计费重计算 | 包裹长宽高、SKU 重量、体积重系数 | 待补：按承运商取系数、取实际重与体积重较大者、保留小数位 | 计费重 | 缺尺寸或重量 |
-| RULE-03 | 运费计算 | 计费重、价格表 | 待补：首重/续重、分区、附加费叠加顺序 | `shippingCost` | 无价卡 |
-| RULE-04 | 比价择优 | 各承运商报价 | 待补：比价口径、并列时如何取最优 | `isBest`、`choiceShippingCost` | 无可比报价 |
-| RULE-05 | PO Box 与地址校验 | `closePoboxCheck`、地址字段 | 待补：命中 PO Box 的处理、地址校验失败是否跳过该承运商 | `canShipping`、`remark` | — |
-| RULE-06 | 结果推送 | `isPushWms`、`pushResultTo` | 待补：推送时机、失败重试、与计算是否同事务 | 推送结果 | 推送失败 |
-
-原有 5 步"推测流程"在规则表补齐后删除，避免两套描述并存。
-
-### 5.6 §1 与 §8：补基础设施与非功能（对应 R-009、R-010）
-
-| 项 | 需补内容 |
-|---|---|
-| 环境地址 | dev / staging / prod 三个 base URL |
-| 鉴权方式 | Token 类型与获取路径、是否需租户头 / 追踪头 |
-| 幂等 | 同 `requestId` 重复提交的行为与标识保留时长 |
-| 超时 | 确认 §8 中"基础 30s / Carrier A 20s / Carrier B 15s"是否适用于本接口 |
-| 限流 | 阈值与触发后的返回 |
-
-### 5.7 §2.2 参数组合矩阵（对应 R-008）
-
-| carrierStrategyCode | carrierIds | 预期结果 | 状态 |
-|---|---|---|---|
-| 传 | 不传 | 待确认 | 待产品 |
-| 不传 | 传 | 待确认 | 待产品 |
-| 传 | 传 | 待确认（是否取交集/并集/以策略为准） | 待产品 |
-| 不传 | 不传 | 待确认（报错还是取默认策略） | 待产品 |
+- R-038：`lsp_quote_task_address (计费地址表)` 等 4 行补反引号。
+- R-039：第二个 `## 10. 变更记录` 改为 `## 11. 变更记录`。
 
 ## 6. 门禁结论
 
-**[拒绝 Reject]**
+**[拒绝 Reject]**（4+补 改判为 **[有条件通过]**，见「4+补 用户答复闭环记录」与复审记录）
 
-- 阻塞项 4 个：R-001（业务背景）、R-002（错误码）、R-003（业务规则）、R-004（金额口径）。
-- 高级未闭环：11 项；中级未闭环：9 项。
-- 允许：回退 `requirement-enrichment` 补充文档，产品 / 后端按第 4、5 节确认并改写。
-- 禁止：进入 `split-requirements` 与 `design-testcases`；禁止写 `knowledge/rules/`。
-- 复审条件：R-001 ~ R-011 全部闭环后重新评审，更新 front-matter 的 `gate` / `blocking_count` / `next_action` 并追加复审记录。
+- **3 个阻塞级**（R-040 幂等键矛盾 / R-041 组包规则空悬 / R-042 示例 zone 与金额可信度）+ **6 个高级**未闭环，按门禁规则禁止进入 `split-requirements` 与 `design-testcases`。
+- 性质说明：文档相比第 3 轮**没有回退**——已闭环项（R-013/R-033/R-008/R-036/R-037）全部维持有效；本轮 Reject 完全由第 4 轮破坏性复审新发现导致。三个阻塞项都集中在异常/多 SKU/幂等场景，主流程（§4/§5 单仓单包双承运商场景）文档质量本身已具备通过条件，后端对 3 个阻塞项给出答复并回填后可快速复审放行。
+- 评审未通过，**不写** `knowledge/rules/`。
 
 ## 7. 复审记录
 
-| 轮次 | 日期 | 结论 | 已闭环 | 仍阻塞 |
-|---|---|---|---|---|
-| 1 | 2026-11-18 | 拒绝 | — | R-001 ~ R-022 |
+| 轮次 | 日期 | 结论 | 已闭环 | 仍阻塞 | 备注 |
+|---|---|---|---|---|---|
+| 1 | 2026-11-18 | Reject | — | 4 阻塞 | 首审 |
+| 2 | 2026-11-19 | conditional-pass | R-001/R-003/R-009/R-010/R-011/R-012 | R-004/R-013/R-024 | |
+| 2+补 | 2026-11-19 | conditional-pass | R-004/R-024 | R-013 | 用户口头决策 |
+| 2+DB | 2026-11-19 | conditional-pass | R-007/R-008/R-025 | R-013 | DB 查询回填 |
+| 3 | 2026-11-19 | Reject | R-013 排序、幂等规则 §1 | R-013 回显 + R-033 extra_fee 歧义 | 用户修改引入回退（错误码被砍、公式 extra_fee 模糊）+ 新问题 5 条 |
+| 3+补 | 2026-11-19 | conditional-pass | R-033（extra_fee 不参与计算） | R-013 | 用户决策并回填 |
+| 3+R013 | 2026-11-19 | Pass | R-013（回显 + 唯一键 + 排序） | 0 | 带 pass-through：高 7 / 中 8 / 低 3 |
+| **4** | **2026-11-19** | **Reject** | **R-037（无价卡承运商行不出现在 data）**；R-027 高→中降级 | **R-040 / R-041 / R-042（均为本轮新发现，共 3 项）** | 文档零变更；深挖新发现 9 项（阻塞 3 / 中 4 / 低 2）+ R-021 升级为高；遗留高级 R-002/R-005/R-020/R-029/R-034 维持未闭环 |
+| **4+补** | **2026-11-19** | **conditional-pass** | **R-040 / R-041 / R-042**（用户答复闭环；R-041 组包规则已回填正文 §7，R-042 正文 §5 补 DB 实查注明） | **0** | 新增中项 R-049/R-050 转 pass-through；高级 6 项维持 pass-through；进入 split-requirements |
+
+## 4+补 用户答复闭环记录（2026-11-19）
+
+| 编号 | 用户答复 | 处置 |
+|---|---|---|
+| R-040 | 幂等口径：相同 `requestId+orderCode` 的重复请求不重新计算，直接返回上一次结果 | **闭环**（与 §1 定义一致）。残留转 **R-049**（中，pass-through）：requestId 未传时的行为与回显口径仍未定义，推定"无幂等键 → 视为新请求直接计算"，负向用例先标 TODO |
+| R-041 | 组包规则：取长边=max(SKU 长)、取宽边=max(SKU 宽)、累加高=ΣSKU 高、累加重=ΣSKU 重、三维从大到小重排+总重量=最终箱规 | **闭环**，规则已回填正文 §7。与 §4 示例核对无冲突（§4 包裹层有值 30×20×15，不触发组包）。残留转 **R-050**（中，pass-through）：累加基数未确认（按 SKU 明细行还是按 qty 折算，§4 重量 2.3=2×1.15 暗示按 qty 折算） |
+| R-042 | 示例数据无问题：Sydney NSW 2000 按 suburb+state+postcode 从 `lsp_carrier_zone` 实查得 zone，MEL→ADL 为 DB 实查结果 | **闭环**（采纳数据源说明；正文 §5 已补注明"DB 实查值，非按目的城市名称推断"）。用例设计约束：金额 golden 值不得直接复制 §5，须按下方断言口径现算现比 |
+
+**断言调整口径（回应"如果断言会出错，需要怎样调整"）**：
+1. 金额断言不做静态 golden：设计用例时用验证 SQL 从 `lsp_carrier_zone` 按 suburb+state+postcode 实查 zone，再从 `lsp_carrier_rate` 按该 zone 段取 fee / fuel_rate，断言 `shippingCost == round(fee × (1 + fuel_rate), 3)`；DB 变价卡断言自动跟随。
+2. 若必须固化 golden 值：固定夹具（同仓库/地址/承运商/箱规/qty），首次以"真实响应 + 验证 SQL"双向核对后再冻结，并在 fuel_rate 调价时同步更新（fuel_rate 是变量，写死必挂）。
+
+**新增问题**：
+- **R-049**（中）§1 / §3.1：requestId 未传时行为未定义（推定视为新请求直接计算；响应回显口径未定）。责任方：后端。
+- **R-050**（中）§7 组包规则：累加基数未确认——按 SKU 明细行累加还是按 qty 折算累加（§4 重量 2.3 = 2×1.15 暗示按 qty 折算）。责任方：产品 + 后端。
