@@ -53,7 +53,7 @@ owner: wendy-luo29
 
 ### 2.3 派件地址（shipTo / QuoteTaskAddressDto）
 
-> DB 映射：`lsp_quote_task_address`（type=派件方向）
+> DB 映射：`lsp_carrier_zone`
 
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |---|---|---|---|---|
@@ -66,7 +66,7 @@ owner: wendy-luo29
 
 ### 2.4 发件地（warehouse[] / QuoteTaskWarehouseDto）
 
-> 发件地有两层含义：① 仓库编码引用 `lsp_warehouse.code`（已建好的仓库主数据）；② 发件地址快照（同 shipTo 结构）。DB 侧 `lsp_quote_task` 只存 `warehouse_code`，地址字段不入库。
+> 发件地有两层含义：① 仓库编码引用 `lsp_warehouse.code`（已建好的仓库主数据）；② 发件地址快照（同 shipTo 结构）。
 
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |---|---|---|---|---|
@@ -82,8 +82,6 @@ owner: wendy-luo29
 
 ### 2.5 包裹（packages[] / QuoteTaskPackageDto）
 
-> DB 映射：`lsp_quote_task_package`
-
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |---|---|---|---|---|
 | packageCode | string | 是 | **max 32**（DB `package_code varchar(32)` NOT NULL） | 包裹编码 |
@@ -94,8 +92,6 @@ owner: wendy-luo29
 | weight | number | 否 | **DB 精度 `double(12,3)`**，默认 0 | 包裹重量 |
 
 ### 2.6 包裹内明细（items[] / QuoteTaskPackageSkuDto）
-
-> DB 映射：`lsp_quote_task_package_sku`
 
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |---|---|---|---|---|
@@ -192,19 +188,19 @@ owner: wendy-luo29
           "items": [
             {
               "sku": "SKU-WIDGET-AU-001",
-              "qty": 2,
-              "length": 15.0,
-              "width": 10.0,
-              "height": 8.0,
+              "qty": 1,
+              "length": 60.5,
+              "width": 30,
+              "height": 15,
               "weight": 1.15,
-              "cube": 1200.0,
-              "cubeWeight": 0.0
+              "cube": 0.027,
+              "cubeWeight": 6.806
             }
           ],
-          "length": 30.0,
-          "width": 20.0,
+          "length": 60.5,
+          "width": 30,
           "height": 15.0,
-          "weight": 2.3
+          "weight": 1.15
         }
       ]
     }
@@ -224,7 +220,6 @@ owner: wendy-luo29
 | 派件地址 | `suburb_name="haymarket"`, `postcode=2000`, `state_code=NSW` | `lsp_address_suburb_postcode` 表 |
 | 承运商 ID | PRO=`CAR2025062611067266788` / 非 PRO=`CAR1772558358570467346` | `lsp_carrier.id` |
 | 箱规 | 30×20×15cm，三边之和 65cm ≤ 120cm，称重 2.3kg ≤ 22kg | 通过箱规校验 |
-| calcMode | 只有 1 个包裹 1 种 SKU，calcMode=1（一票一件）和 calcMode=2（一票多件）结果相同 | — |
 
 ## 5. 响应示例
 
@@ -304,6 +299,7 @@ Carrier B   calcMode=2  $19.960  (同1)   (合并为内部最优)
 ```
 
 > 当某承运商 `canShipping=false`（如一票多件超箱规）时，该 calcMode 不参与本承运商内部择优；承运商若无有效 calcMode 结果则整体不出现。
+> 当某承运商只支持一票一件计费时，同步接口的响应结果只返回一票一件的计费结果，在计费过程中会计算一票一件和一票多件两种结果，一票多件的canShipping标记为false
 
 ## 6. 错误码
 
@@ -330,7 +326,7 @@ Carrier B   calcMode=2  $19.960  (同1)   (合并为内部最优)
 
 - **发运重**：取称重计算 `weight`，有小数向上取整；优先包裹层，无则取 SKU 层。
 - **金额精度**：所有金额字段四舍五入保留三位小数；**币种暂不考虑**。
-- **包裹的箱规取值计算**：支持多包裹计算，多个包裹的话按一个包裹一个包裹计算，最后运费按包裹运费之和
+- **包裹的箱规取值计算**：支持多包裹计算，新增承运商只支持计算方式：一票一件
 	- 若包裹层为0，则取sku的箱规信息；如果一个包裹存在多个sku，需要把sku的信息重新组包
 		- 组包规则：
 			- 取长边：对比所有 SKU，取最大的长度作为最终长边
@@ -338,17 +334,30 @@ Carrier B   calcMode=2  $19.960  (同1)   (合并为内部最优)
 			- 累加高：将所有 SKU 的高度进行累加求和
 			- 累加重：将所有 SKU 的重量进行累加求和
 			- 重排序：将最终得到的“长、宽、高”三个维度，按从大到小的顺序重新排列，拼接上总重量，得出最终箱规
-- **箱规限制（不可发）**：最长边 >120cm，三边之和 >120cm，称重 >22kg。
+- **箱规限制（不可发）**：最长边 >120cm或三边之和 >120cm或称重 >22kg，任一条件满足，即为不可发运。
 - **总运费（税前）** = 基础运费 ×（1 + 燃油费率）
   - 称重 ≤5kg：基础运费 = `lsp_carrier_rate.fee`（Basic 首重基础运费）
   - 称重 >5kg：基础运费 = `lsp_carrier_rate.fee + (称重-5) × lsp_carrier_rate.per_kilogram_fee`（Per KG 续重单价）
   - **附加费规则**（重要）：
     1. DB `lsp_carrier_rate.extra_fee` 列当前**不参与运费计算**（所有承运商价卡里都有该字段值，但系统未使用）
-    2. 当前无 RAS 类（按地区触发的偏远附加费）等其他附加费项
-    3. 本轮新增承运商 AU.TGE.PRIORITY.PRO 同样无任何附加费
-    4. 未来若开启 RAS 或启用 extra_fee 列，需要同步更新公式和文档
+    2. 本轮新增承运商 AU.TGE.PRIORITY.PRO 无任何附加费
   - 燃油费率 = `lsp_carrier_rate.fuel_rate`（按承运商区分，**AU.TGE.PRIORITY.PRO 的 fuel_rate=0.2861**）
   - **zone 映射**：派件地址 postcode → zone 编码，查 `lsp_carrier_zone` 表；不同承运商 zone 划分不一样
+- **计算方式说明**（通用所有本地计算承运商）
+	- 一票一件：拆单计算，每个包裹单独计算计费重量并匹配运费，最后将所有包裹的运费进行累加。
+	- 一票多件：合单计算，将订单中的所有包裹视为一个整体。取所有包裹的最长边，累加所有包裹的计费重，生成一个合并后的“虚拟大包裹”，用这个整体数据去计算运费。
+	 - 示例说明：
+		- 包裹数据：
+		- 包裹1：尺寸 30 12 10，实重 5kg（假设计费重为 5kg）
+		- 包裹2：尺寸 60 20 15，实重 10kg（假设计费重为 10kg）
+		- 一票一件（累加运费）：
+		- 包裹1：用 30 12 10 + 计费重 5kg 代入公式 → 得出运费A
+		- 包裹2：用 60 20 15 + 计费重 10kg 代入公式 → 得出运费B
+		- 总运费 = 运费A + 运费B
+		- 一票多件（合并计费）：
+		- 提取最长边：对比两个包裹的最大长度，取 60
+		- 累加总重量：5kg + 10kg = 15kg
+		- 总运费 = 使用合并后的规格（最长边 60，总重量 15kg）代入公式计算 → 得出最终总运费
 - **择优**：两层择优，见 §7 流程第 5 步。
   - 多个承运商参与计费，如果其中一个承运商超时则整单报错；若其中一个承运商无价卡则不返回此承运商计费信息，只选择有返回结果的承运商比价
   - 多仓计费，按仓生成计费任务，按仓库计费择优，若其中一个仓计费失败，则整单计费失败
@@ -369,19 +378,37 @@ Carrier B   calcMode=2  $19.960  (同1)   (合并为内部最优)
 
 ## 9. 数据影响
 
-| 数据库表名 | 说明 |
-| :--- | :--- |
-| `lsp_carrier` (承运商表) | 承运商基础配置表 |
-| `lsp_carrier_strategy` (策略表) | 承运商策略表 |
-| `lsp_carrier_strategy_refs` (关联表) | 承运商策略关联的承运商id或者代表费 |
-| `lsp_carrier_rate` (价卡表) | 承运商价卡表 |
-| `lsp_carrier_zone` (收件地址表) | 收件地址表 |
-| `lsp_warehouse` (发货地址表) | 仓库信息表 |
-| `lsp_quote` (计费结果表) | 计费结果及择优 |
-| lsp_quote_task_address (计费地址表) | 计费后发货地址和收件地址信息 |
-| lsp_quote_task_package（计费包裹表） | 计费包裹信息 |
-| lsp_quote_task_package_sku（计费包裹的sku表） | 包裹内sku明细 |
-| `lsp_quote_task_log` (计费日志表) | 参与计算的承运商及计费报错日志查看 |
+### 9.1 准入校验（请求前读，决定能不能进入计费）
+
+用于入参合法性校验和承运商筛选，不直接参与金额计算。
+
+| 数据库表名 | 说明 | 测试用途 |
+| :--- | :--- | :--- |
+| `lsp_carrier` (承运商表) | 承运商基础配置表（启用状态等） | 断言承运商是否可参与计费 |
+| `lsp_carrier_strategy` (策略表) | 承运商策略表 | 校验 `carrierStrategyCode` 是否存在 |
+| `lsp_carrier_strategy_refs` (关联表) | 承运商策略关联的承运商 id 或者代表 | 断言策略下选中的承运商集合 |
+| `lsp_warehouse` (发货地址表) | 仓库信息表 | 校验 `warehouseCode` 是否存在 |
+
+### 9.2 计费输入（计算过程中读，直接影响金额）
+
+计算时实时读取，**决定最终报价**。写用例时需要反算期望值。
+
+| 数据库表名 | 说明 | 测试用途 |
+| :--- | :--- | :--- |
+| `lsp_carrier_zone` (收件地址表) | 收件地址 → 承运商 zone 的映射 | 确认收件 postcode 映射到正确的 zone，从而命中正确的价卡 |
+| `lsp_carrier_rate` (价卡表) | 承运商价卡表（分段起点/终点、fee、per_kg、fuel） | 反算运费|
+
+### 9.3 计费结果（请求后写，用来断言是否成功）
+
+请求结束后新写入或更新的表，是验证 SQL 的主要落点。
+
+| 数据库表名 | 说明 | 测试用途 |
+| :--- | :--- | :--- |
+| `lsp_quote_task` (计费结果表) | 计费结果及择优 | 断言运费金额predict_price，择优承运商predict_carrier_code，计算方式predict_calc_mode等字段|
+| `lsp_quote_task_address` (计费地址表) | 计费后发货地址和收件地址信息 | 断言地址快照落库正确 |
+| `lsp_quote_task_package` (计费包裹表) | 计费包裹信息 | 断言包裹层尺寸、重量、按请求参数入库 |
+| `lsp_quote_task_package_sku` (计费包裹的 SKU 表) | 包裹内 SKU 明细 | 断言 SKU 层字段落库 |
+| `lsp_quote_task_job_log` (计费日志表) | 参与计算的承运商及计费报错日志查看 | 断言失败原因（无价卡、超时、PO Box 等） |
 
 
 ## 10. 依赖影响

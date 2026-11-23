@@ -1,0 +1,53 @@
+{
+  "ownerId": "BG",
+  "orderCode": "TESTSO20261119-001",
+  "requestId": "SAC202611190001",
+  "carrierIds": [
+    "CAR2025062611067266788",
+    "CAR1772558358570467346"
+  ],
+  "shipTo": {
+    "country": "AU",
+    "state": "NSW",
+    "suburb": "Haymarket",
+    "postcode": "2000",
+    "address1": "456 George Street",
+    "address2": ""
+  },
+  "warehouse": [
+    {
+      "warehouseCode": "BG03",
+      "shipmentCode": "TESTBG0320261119-001",
+      "country": "AU",
+      "state": "VIC",
+      "suburb": "Maidstone",
+      "postcode": "3012",
+      "address1": "C 35-77 Emu Road",
+      "packages": [
+        {
+          "packageCode": "QTP38177618321238-001",
+          "length": 60.5,
+          "width": 30,
+          "height": 15.0,
+          "weight": 1.15,
+          "items": [
+            {
+              "sku": "SKU-WIDGET-AU-001",
+              "qty": 1,
+              "length": 60.5,
+              "width": 30,
+              "height": 15,
+              "weight": 1.15,
+              "cube": 0.027,
+              "cubeWeight": 6.806
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "isPushWms": false,
+  "pushResultTo": 0,
+  "shippingType": 100,
+  "closePoboxCheck": 200
+}

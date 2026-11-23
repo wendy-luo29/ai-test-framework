@@ -1,0 +1,75 @@
+# LspQuote - price_sync 模块配置（REQ-002 /quote/price_sync）
+# 设计依据: requirements/docs/REQ-002_quote_price_sync.md (V1.1)
+# 用例设计: testcases/REQ-002-quote_price/REQ-002-TC-distilled.md
+# 约束: 密钥一律走环境变量；空值字段对应的用例在运行时 skip 并给出回填指引
+
+path: "/quote/price_sync"
+
+auth:
+  # Bearer Token 的环境变量名。设置了名字但环境变量为空 → 全部用例 skip（接口要求鉴权）
+  token_env: "TEST_LSP_QUOTE_TOKEN"
+
+expected:
+  http_status_ok: 200
+  # §6 错误码表仅定义 200=成功，负向统一断言 code != "200"（R-002 闭环前唯一可执行口径）
+  code_success: "200"
+
+master_data:
+  owner_id: "BG"
+  warehouse_code: "BG03"
+  warehouse_address:
+    country: "AU"
+    state: "VIC"
+    suburb: "Maidstone"
+    postcode: "3012"
+    address1: "C 35-77 Emu Road"
+    address2: ""
+  # lsp_carrier.id 实查值（REQ §4）
+  carrier_pro_id: "CAR2025062611067266788"     # AU.TGE.PRIORITY.PRO (fuel 0.2861)
+  carrier_base_id: "CAR1772558358570467346"    # AU.TGE.PRIORITY (fuel 0.097)
+  # ⚠ 校准点1: 需按 lsp_carrier_rate 实查一个"无有效价卡"的承运商 id 回填（TC-QPS-012）
+  carrier_no_rate_id: ""
+  # ⚠ 校准点2: 澳邮承运商 id（PO Box 用例 TC-QPS-011），从 lsp_carrier 实查回填
+  au_post_carrier_id: ""
+
+# 目的地（派件地）。zone 由 lsp_carrier_zone 按 postcode 实查，禁止按城市名推断（REQ §5）
+destinations:
+  dest_a:
+    country: "AU"
+    state: "NSW"
+    suburb: "Haymarket"
+    postcode: "2000"
+    address1: "456 George Street"
+    address2: ""
+  # ⚠ 校准点3: 与 dest_a 映射到不同 zone 的第二个目的地（TC-QPS-004），
+  #    从 lsp_carrier_zone 按 carrier_id 实查另一 postcode 后回填；为空则该用例 skip
+  dest_b: {}
+
+# 业务阈值（REQ §7），断言与用例共用，改阈值只需改这里
+rules:
+  basic_limit_kg: 5          # ≤5kg 取 Basic 首重 fee；>5kg 叠加 per_kilogram_fee
+  max_side_cm: 120           # 最长边上限（> 为不可发）
+  max_sum_cm: 120            # 三边之和上限（> 为不可发）
+  max_weight_kg: 22          # 称重上限（> 为不可发）
+
+# 验证 SQL 模板（金额"现算现比"口径，评审 4+补）
+# ⚠ 校准点4: 列名/表名需按 lsp_scp 实际 schema 校准后再跑 db 用例；
+#    zone_rate 必须返回 fee / per_kilogram_fee / fuel_rate 三列
+sql:
+  # 参数: %(carrier_id)s %(postcode)s %(weight)s —— zone 段 + 称重段联合取价卡
+  zone_rate: >-
+    SELECT r.fee, r.per_kilogram_fee, r.fuel_rate
+    FROM lsp_carrier_zone z
+    JOIN lsp_carrier_rate r
+      ON r.carrier_id = %(carrier_id)s
+     AND r.zone_code = z.zone_code
+    WHERE z.postcode = %(postcode)s
+      AND %(weight)s > r.weight_from
+      AND %(weight)s <= r.weight_to
+    LIMIT 1
+  # 参数: %(request_id)s —— 幂等/副作用断言用（M-13 清理策略：requestId 唯一即天然隔离）
+  task_count_by_request: >-
+    SELECT COUNT(*) AS cnt FROM lsp_quote_task WHERE request_id = %(request_id)s
+  # 参数: %(order_code)s
+  task_count_by_order: >-
+    SELECT COUNT(*) AS cnt FROM lsp_quote_task WHERE order_code = %(order_code)s
