@@ -3,6 +3,14 @@ __pycache__/
 .pytest_cache/
 .venv/
 allure-results/
-.claude/
 *.log
 .env
+
+# Claude 配置目录：只跟踪 skills，忽略其余本地内容
+.claude/*
+!.claude/skills/
+
+# skills 下的运行时产物不入库
+.claude/skills/**/output/
+.claude/skills/**/workspaces/
+.claude/skills/**/db_config.json
