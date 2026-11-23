@@ -17,7 +17,7 @@ services:
     prod: ""
   lsp_quote:
     local: ""
-    dev: ""
+    dev: "http://192.168.1.71:13100"   # 计费/报价服务，路径 /quote/price_sync
     staging: ""
     prod: ""
   lsp_booking:

@@ -1,0 +1,245 @@
+# REQ-002 /quote/price_sync 用例清单（机器可校验的唯一来源）
+# 与 tests/api/test_quote_price_sync.py 中的 `# case_id:` 一一对应，
+# scripts/knowledge_guard.py 会交叉校验两者，防止回归索引出现幽灵用例。
+# 编号规则：V1.6 废弃用例编号不回收（002/003/011/015/018 已删除），新增自 TC-QPS-020 起。
+requirement_id: REQ-002
+module: lsp_quote
+feature: quote_price
+version: v1.6
+source_requirement: requirements/docs/REQ-002_quote_price_sync.md
+ac_list: requirements/decomposition/REQ-002-AC-list.yaml
+design_doc: testcases/REQ-002-quote_price/REQ-002-TC-distilled.md
+script: tests/api/test_quote_price_sync.py
+
+cases:
+  - case_id: TC-QPS-001
+    title: 主流程：VIR 双承运商成功 + 响应契约 + 全局择优 + PRO 金额现算 + 成功落库（requestId/orderCode 查库）
+    priority: P0
+    type: 正向
+    ac: [AC-01, AC-02, AC-14, AC-18, AC-26, AC-28, AC-49]
+    automated: true
+    function: test_main_flow_two_carriers
+
+  - case_id: TC-QPS-004
+    title: zone 映射：两个目的 postcode 各自命中区段价卡并现算
+    priority: P0
+    type: 正向
+    ac: [AC-20]
+    automated: true
+    function: test_zone_mapping_switch
+
+  - case_id: TC-QPS-005
+    title: 一票一件多包裹：运费 = Σ 每包裹独立计费，PRO 行 calcMode=1
+    priority: P0
+    type: 正向
+    ac: [AC-17, AC-29]
+    automated: true
+    function: test_multi_package_sum
+
+  - case_id: TC-QPS-006
+    title: 续重段：称重取整 6kg 时基础运费 = fee + (计费重-5)×per_kg
+    priority: P1
+    type: 边界
+    ac: [AC-19]
+    automated: true
+    function: test_per_kg_above_5kg
+
+  - case_id: TC-QPS-007
+    title: 非 PRO 承运商参与比价后内部择优：两包一票返回恰 1 行且金额 ≤ 分包裹单独计费之和
+    priority: P1
+    type: 正向
+    ac: [AC-27]
+    automated: true
+    function: test_internal_optimal_two_modes
+
+  - case_id: TC-QPS-008
+    title: 包裹层全 0 时取 SKU 层 / 多 SKU 组包规则（qty=1）
+    priority: P1
+    type: 边界
+    ac: [AC-15, AC-16]
+    automated: true
+    function: test_package_dims_zero_fallback
+
+  - case_id: TC-QPS-009
+    title: 新增承运商超箱规被过滤，老承运商正常报价
+    priority: P1
+    type: 边界
+    ac: [AC-22]
+    automated: true
+    function: test_oversized_carrier_filtered
+
+  - case_id: TC-QPS-010
+    title: 箱规边界恰好可发：三边和=120、原始称重=22kg
+    priority: P2
+    type: 边界
+    ac: [AC-21]
+    automated: true
+    function: test_boundary_billable
+
+  - case_id: TC-QPS-012
+    title: 多承运商中无价卡承运商被过滤，其余正常比价
+    priority: P0
+    type: 正向
+    ac: [AC-30]
+    automated: true
+    function: test_no_rate_carrier_skipped
+
+  - case_id: TC-QPS-013
+    title: 参数校验族：必填缺失 / 长度越界 / 策略为空 → 500，requestId 64 正常
+    priority: P2
+    type: 负向
+    ac: [AC-05, AC-07, AC-12]
+    automated: true
+    function: test_request_validation
+
+  - case_id: TC-QPS-014
+    title: 未知仓库→500 落 status=300；VIR 中 carrierId 不存在→500 不落行
+    priority: P2
+    type: 负向
+    ac: [AC-32, AC-39]
+    automated: true
+    function: test_master_data_missing
+
+  - case_id: TC-QPS-016
+    title: 体积重不参与计费：体积重>实重时仍按称重段现算
+    priority: P1
+    type: 边界
+    ac: [AC-14]
+    automated: true
+    function: test_volume_weight_not_billed
+
+  - case_id: TC-QPS-017
+    title: 箱规按单包裹判定：两包各 21.5kg 合计 43kg 不触发不可发
+    priority: P2
+    type: 边界
+    ac: [AC-21]
+    automated: true
+    function: test_box_rule_per_package
+
+  - case_id: TC-QPS-019
+    title: pushResultTo=100 非法枚举被拒绝且不落库
+    priority: P2
+    type: 负向
+    ac: [AC-08]
+    automated: true
+    function: test_invalid_push_result_to
+
+  - case_id: TC-QPS-020
+    title: 不幂等：相同 requestId+orderCode 连调两次均成功且任务数+1
+    priority: P1
+    type: 正向
+    ac: [AC-45]
+    automated: true
+    function: test_no_idempotent_replay
+
+  - case_id: TC-QPS-021
+    title: 包裹层尺寸/重量部分为 0→500；packageCode 重复→500；均不落行
+    priority: P1
+    type: 负向
+    ac: [AC-36, AC-37]
+    automated: true
+    function: test_package_validation
+
+  - case_id: TC-QPS-022
+    title: VIR 段非法 / 策略编码不存在 / 策略绑定空集合 → 500
+    priority: P2
+    type: 负向
+    ac: [AC-38, AC-40]
+    automated: true
+    function: test_strategy_validation
+
+  - case_id: TC-QPS-023
+    title: 仅新增承运商参与且超箱规→500，落 status=300
+    priority: P1
+    type: 负向
+    ac: [AC-23]
+    automated: true
+    function: test_only_new_carrier_oversized_fails
+
+  - case_id: TC-QPS-024
+    title: 失败统一契约：code="500" + msg 非空 + data=null（HTTP 不强制；响应无 requestId/orderCode）
+    priority: P1
+    type: 负向
+    ac: [AC-44]
+    automated: true
+    function: test_failure_contract
+
+  - case_id: TC-QPS-025
+    title: 无价卡失败分支：单承运商无价卡→500；全部无价卡→500，均落 status=300
+    priority: P1
+    type: 负向
+    ac: [AC-51, AC-52]
+    automated: true
+    function: test_no_rate_failure
+
+  - case_id: TC-QPS-026
+    title: 金额并列时 isBest=1 为排序第一条（无并列则 skip）
+    priority: P1
+    type: 边界
+    ac: [AC-48]
+    automated: true
+    function: test_tie_break_order
+
+  - case_id: TC-QPS-027
+    title: 失败落库口径：计算失败落 status=300 空承运商；参数校验不落行；job_log 软断言
+    priority: P1
+    type: 负向
+    ac: [AC-50]
+    automated: true
+    function: test_failure_persistence
+
+  - case_id: TC-QPS-028
+    title: carrierStrategyCode=quote_price 计费，按 ubi/broers 有效 8 家范围校验（范围外告警）
+    priority: P1
+    type: 正向
+    ac: [AC-10]
+    automated: true
+    function: test_strategy_code_billing
+
+  - case_id: TC-QPS-029
+    title: country=AU/au/Australia 通过、NZ→500；state 全称通过且落库简称
+    priority: P2
+    type: 边界
+    ac: [AC-41, AC-42]
+    automated: true
+    function: test_country_and_state
+
+  - case_id: TC-QPS-030
+    title: shippingType/shipmentType 任意值不影响计费；closePoboxCheck 100/200 均正常计费
+    priority: P2
+    type: 正向
+    ac: [AC-46, AC-47]
+    automated: true
+    function: test_passthrough_fields
+
+  - case_id: TC-QPS-031
+    title: 同时传 carrierIds 与 VIR 策略时只按策略选承运商
+    priority: P2
+    type: 正向
+    ac: [AC-43]
+    automated: true
+    function: test_carrier_ids_ignored
+
+  - case_id: TC-QPS-032
+    title: 不传 requestId 仍正常计费（不做幂等）
+    priority: P2
+    type: 正向
+    ac: [AC-06]
+    automated: true
+    function: test_missing_request_id
+
+  - case_id: TC-QPS-033
+    title: 承运商超时整单 500（缺故障注入手段，运行时 skip）
+    priority: P2
+    type: 负向
+    ac: [AC-31]
+    automated: true
+    function: test_carrier_timeout
+
+  - case_id: TC-QPS-034
+    title: M-007 schema 上限用例（未闭环，运行时 skip）
+    priority: P2
+    type: 边界
+    ac: [AC-53]
+    automated: true
+    function: test_schema_upper_bound

@@ -4,14 +4,18 @@
 #
 # 维护规则：
 # 1. 每次规则/API/DB 变更 → 新增 change 条目（不是覆盖旧的）
-# 2. regression_targets 用 case_id（如 TC-ADDR-001），不用自然语言描述
-# 3. 历史条目保留，标记 status: superseded 即可
-# 4. Skill 在执行时读 changes[].regression_targets 来决定跑哪些用例
-# 5. 新增/变更条目后运行 python scripts/knowledge_guard.py 校验
+# 2. regression_targets 用 case_id（如 TC-QPS-001），必须同时存在于
+#    testcases/*.yaml 与 tests/**/*.py 的 `# case_id:`，禁止幽灵回归项
+# 3. 确实没有自动化用例时，regression_targets 置空并填写 coverage_gap 说明缺口
+# 4. 历史条目保留，标记 status: superseded 即可
+# 5. Skill 在执行时读 changes[].regression_targets 来决定跑哪些用例
+# 6. 新增/变更条目后运行 python scripts/knowledge_guard.py --strict 校验
 
 changes:
   # ───────────────────────────────────────────────────────
   # CHG-001: 地址校验 v2.1 规则全面确认
+  # 缺口：地址校验尚无自动化脚本（tests/api 下只有 REQ-002 计费用例），
+  #       历史 TC-ADDR-* 编号为设计稿，未落脚本，已从回归目标移除。
   # ───────────────────────────────────────────────────────
   - id: CHG-001
     module: lsp_backend
@@ -23,10 +27,8 @@ changes:
       country 字段接受 AU/Australia（大小写不敏感），
       默认值 Australia，非 AU 拒绝。
     affected_carriers: [all]
-    regression_targets:
-      - TC-ADDR-003   # test_non_australia_country_rejected
-      - TC-ADDR-011   # test_country_variants
-      - TC-ADDR-012   # test_country_empty_or_null (目前 skip，等确认)
+    regression_targets: []
+    coverage_gap: "无自动化脚本：address_validation 尚未生成 tests/api 用例"
     gotchas: [gotcha_001, gotcha_002]
     knowledge_docs:
       - knowledge/rules/lsp_backend/address_validation.md
@@ -43,11 +45,8 @@ changes:
       not-found 场景走 HTTP 200 + data.success=false，
       不是 HTTP 404。reason="address not found"。
     affected_carriers: [all]
-    regression_targets:
-      - TC-ADDR-008   # test_key_case_and_whitespace
-      - TC-ADDR-009   # test_null_or_empty_key_fields
-      - TC-ADDR-025   # test_not_found_short_circuits_pobox
-      - TC-ADDR-029   # test_suburb_special_or_long
+    regression_targets: []
+    coverage_gap: "无自动化脚本：address_validation 尚未生成 tests/api 用例"
     gotchas: [gotcha_002]
     knowledge_docs:
       - knowledge/rules/lsp_backend/address_validation.md
@@ -63,9 +62,8 @@ changes:
       state 全名自动标准化为缩写；
       DB 查询 suburb 大小写不敏感 (UPPER 包装)。
     affected_carriers: [all]
-    regression_targets:
-      - TC-ADDR-030   # test_state_full_name
-      - TC-ADDR-050   # test_all_states_abbrev_and_full
+    regression_targets: []
+    coverage_gap: "无自动化脚本：address_validation 尚未生成 tests/api 用例"
     knowledge_docs:
       - knowledge/rules/lsp_backend/address_validation.md
     status: active
@@ -80,10 +78,8 @@ changes:
       PO Box 正则大小写不敏感，覆盖 PO Box / P.O.Box /
       Post Office Box / GPO / LPO 等变体。
     affected_carriers: [all]
-    regression_targets:
-      - TC-ADDR-022   # test_pobox_positive_variants
-      - TC-ADDR-023   # test_pobox_negative_variants
-      - TC-ADDR-024   # test_pobox_case_variants (xfail 待解)
+    regression_targets: []
+    coverage_gap: "无自动化脚本：address_validation 尚未生成 tests/api 用例"
     gotchas: [gotcha_001]
     knowledge_docs:
       - knowledge/rules/lsp_backend/address_validation.md
@@ -92,6 +88,7 @@ changes:
 
   # ───────────────────────────────────────────────────────
   # CHG-002: Carrier A v1.2 → v2.0 计费规则升级
+  # 缺口：carrier_a 为配置层样例，未生成对应脚本（REQ-002 走 SCP 真实承运商）。
   # ───────────────────────────────────────────────────────
   - id: CHG-002
     module: lsp_quote
@@ -105,10 +102,8 @@ changes:
       体积重公式变更：系数 5000 → 4000，
       体积重计算值更大，计费更高。
     affected_carriers: [carrier_a]
-    regression_targets:
-      - TC-QUOTE-CARA-001
-      - TC-QUOTE-CARA-015
-      - TC-QUOTE-CARA-022
+    regression_targets: []
+    coverage_gap: "无自动化脚本：carrier_a 配置样例未生成 tests/api 用例"
     knowledge_docs:
       - knowledge/rules/lsp_quote/pricing_generic.md
       - knowledge/changelog/2026-11-20_quote_carrier_a_v2.md
@@ -124,14 +119,65 @@ changes:
     description: |
       v2.0 新增偏远地区附加费 flag，固定 $3.50/包裹。
     affected_carriers: [carrier_a]
-    regression_targets:
-      - TC-QUOTE-CARA-031
+    regression_targets: []
+    coverage_gap: "无自动化脚本：carrier_a 配置样例未生成 tests/api 用例"
     knowledge_docs:
       - knowledge/changelog/2026-11-20_quote_carrier_a_v2.md
     status: active
 
+  # ───────────────────────────────────────────────────────
+  # CHG-003: REQ-002 /quote/price_sync 进入自动化回归
+  # 回归目标与 testcases/REQ-002-TC-list.yaml、tests/api/test_quote_price_sync.py 对齐。
+  # ───────────────────────────────────────────────────────
+  - id: CHG-003
+    module: lsp_quote
+    feature: quote_price
+    field: POST /quote/price_sync
+    date: "2026-11-23"
+    type: new_feature
+    description: |
+      REQ-002 承运商运费计算同步接口自动化用例按需求 V1.6 对齐，
+      29 个用例覆盖 V1.6 AC 清单（002/003/011/015/018 已随范围变更删除，编号不回收）。
+    affected_carriers: [AU.TGE.PRIORITY, AU.TGE.PRIORITY.PRO]
+    regression_targets:
+      - TC-QPS-001
+      - TC-QPS-004
+      - TC-QPS-005
+      - TC-QPS-006
+      - TC-QPS-007
+      - TC-QPS-008
+      - TC-QPS-009
+      - TC-QPS-010
+      - TC-QPS-012
+      - TC-QPS-013
+      - TC-QPS-014
+      - TC-QPS-016
+      - TC-QPS-017
+      - TC-QPS-019
+      - TC-QPS-020
+      - TC-QPS-021
+      - TC-QPS-022
+      - TC-QPS-023
+      - TC-QPS-024
+      - TC-QPS-025
+      - TC-QPS-026
+      - TC-QPS-027
+      - TC-QPS-028
+      - TC-QPS-029
+      - TC-QPS-030
+      - TC-QPS-031
+      - TC-QPS-032
+      - TC-QPS-033
+      - TC-QPS-034
+    knowledge_docs:
+      - knowledge/changelog/2026-11-23_req002_quote_price.md
+      - requirements/docs/REQ-002_quote_price_sync.md
+      - testcases/REQ-002-TC-list.yaml
+    status: active
+
 # ───────────────────────────────────────────────────────
 # 模块-承运商-版本 三维索引（快速查找用）
+# test_path 为空表示该功能暂无自动化脚本，需先在 tests/ 下落库再回填
 # ───────────────────────────────────────────────────────
 module_registry:
   lsp_backend:
@@ -141,11 +187,13 @@ module_registry:
       address_validation:
         current_version: v2.1
         config_path: config/lsp_backend/address_validation.yaml
-        test_path: tests/lsp_backend/address/
+        test_path: ""
+        test_status: no_automation
       strategy_config:
         current_version: v1.0
         config_path: config/lsp_backend/strategy_config.yaml
-        test_path: tests/lsp_backend/strategy/
+        test_path: ""
+        test_status: no_automation
 
   lsp_quote:
     description: 物流计费/报价
@@ -154,13 +202,15 @@ module_registry:
       pricing:
         current_version: carrier_a=v2.0, carrier_b=v1.0
         config_path: config/lsp_quote/
-        test_path: tests/lsp_quote/pricing/
+        test_path: ""
+        test_status: no_automation
 
       # REQ-002 /quote/price_sync：目标为 SCP 环境真实承运商（AU.TGE.*），非 carrier_a/b 假数据
       quote_price:
-        current_version: v1.1
-        config_path: config/lsp_quote/
-        test_path: tests/lsp_quote/quote_price/
+        current_version: v1.6
+        config_path: config/lsp_quote/price_sync.yaml
+        test_path: tests/api/test_quote_price_sync.py
+        case_list: testcases/REQ-002-TC-list.yaml
         requirement_id: REQ-002
 
   lsp_booking:
@@ -170,4 +220,5 @@ module_registry:
       declare:
         current_version: v1.0
         config_path: config/lsp_booking/
-        test_path: tests/lsp_booking/declare/
+        test_path: ""
+        test_status: no_automation

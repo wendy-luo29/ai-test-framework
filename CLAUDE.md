@@ -43,23 +43,22 @@ pytest tests/ui                                               # UI layer only
 pytest tests/ui/test_example_home.py::test_home_page_heading  # single test
 pytest --headed                                               # watch the browser
 pytest --browser firefox                                      # chromium (default) | firefox | webkit
-pytest -n auto                                                # parallel via pytest-xdist
 pytest --html=reports/report.html --self-contained-html       # HTML report
 PWDEBUG=1 pytest tests/ui                                     # Playwright inspector (bash syntax)
 ```
 
 ## Architecture
 
-Dependency direction is `tests/` → `pages/` or `api_clients/` → `config/`; fixtures live in the root `conftest.py`.
+Dependency direction is `tests/` → `pages/` or `api_clients/` → `config/`; fixtures live in the root `conftest.py`, with layer-specific fixtures in `tests/api/conftest.py` and `tests/ui/conftest.py`.
 
-- `config/env.yaml` — the single source of runtime settings: `ui_base_url`, `api_base_url`, `api_timeout`, and a `credentials` block. Empty base URLs select the local demo server.
+- `config/base.yaml` + `config/env.yaml` — `base.yaml` 维护公共定义（`env`、`services.<module>.<env>`、`database`、`api_timeout`），`env.yaml` 只写本机差异（地址、账号），加载时深度合并，同名键由 `env.yaml` 覆盖。`api_base_url` 仅作兼容保留，新代码用 `get_service_url(module)`。
 - `config/config_loader.py` — `load_config()` parses and validates the YAML mapping; `get_config()` caches it; `get_value("dotted.path")` and `get_required("dotted.path")` read nested values, with `ConfigError` for missing/malformed config.
 - `conftest.py` — owns the fixture graph:
   - `local_server` — session-scoped threaded `http.server` exposing `/` (demo HTML page), `/api/posts[/{id}]`, and `/api/user/get_profile?user_id=`; the offline default target.
   - `config` — cached YAML configuration.
-  - `ui_base_url` / `api_base_url` — read `config/env.yaml`, falling back to `local_server`. API test paths include the full route (e.g. `/api/user/get_profile`) since the base URL is the host root.
+  - `ui_base_url` / `api_base_url` — read the merged config, falling back to `local_server`.
   - `browser_context_args` — overrides pytest-playwright to inject `base_url` and a fixed viewport into every browser context.
-  - `api_client` — function-scoped `BaseApiClient`, timeout from `config/env.yaml`, closed on teardown.
+  - API 层 fixture（`quote_client`、`scp_db` 等）在 `tests/api/` 内定义；`tests/api/conftest.py` 的会话级自检会在被测地址或 Token 缺失时直接失败，避免"全部 skip 仍算通过"。
   - `load_json` — reads payloads from `data/`.
 - `api_clients/base_client.py` — `BaseApiClient` wraps a `requests.Session` with base-URL joining, a default timeout, and `get`/`post` helpers. Service-specific clients subclass it and stay transport-only.
 - `pages/base_page.py` — `BasePage` wraps a Playwright `Page` with navigation and locate/expect helpers. One class per screen.

@@ -1,7 +1,8 @@
 """版本化配置加载器。
 
 加载优先级（越具体越优先，后者覆盖前者）：
-    base.yaml                  → 通用默认值
+    base.yaml                  → 通用默认值（服务地址、数据库、超时）
+    env.yaml                   → 本机覆盖层（与之深度合并，不整份替换）
     <module>/<feature>.yaml   → 模块通用配置
     <module>/carriers/<carrier>.yaml      → 承运商覆盖（可选）
     <module>/carriers/<carrier>/<version>.yaml  → 版本覆盖（可选）
@@ -73,19 +74,16 @@ def _load_yaml(path: Path) -> dict:
 def get_config() -> dict[str, Any]:
     """返回合并好的基础配置。
 
-    优先：env.yaml（旧版，兼容） > base.yaml（新版）。
-    这样渐进式迁移不会断。
+    base.yaml 打底，env.yaml 作为本机覆盖层深度合并（同名键覆盖，未出现的键保留）。
+    这样 env.yaml 只关心本机差异（地址/账号），服务清单、数据库等公共定义
+    统一在 base.yaml 维护，不会因为 env.yaml 存在就被整份丢弃。
     """
-    if _LEGACY_ENV_FILE.is_file():
-        return _load_yaml(_LEGACY_ENV_FILE)
-
     if not BASE_FILE.is_file():
-        raise ConfigError(
-            f"Configuration file not found. Expected either "
-            f"{_LEGACY_ENV_FILE} or {BASE_FILE}"
-        )
+        raise ConfigError(f"Configuration file not found: {BASE_FILE}")
 
     data = _load_yaml(BASE_FILE)
+    if _LEGACY_ENV_FILE.is_file():
+        data = deep_merge(data, _load_yaml(_LEGACY_ENV_FILE))
     # 展开 services[env] → api_base_url（向后兼容旧 key）
     env = data.get("env", "local")
     services = data.get("services", {})

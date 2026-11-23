@@ -1,22 +1,23 @@
 # LspQuote - price_sync 模块配置（REQ-002 /quote/price_sync）
-# 设计依据: requirements/docs/REQ-002_quote_price_sync.md (V1.1)
+# 设计依据: requirements/docs/REQ-002_quote_price_sync.md (V1.6)
 # 用例设计: testcases/REQ-002-quote_price/REQ-002-TC-distilled.md
-# 约束: 密钥一律走环境变量；空值字段对应的用例在运行时 skip 并给出回填指引
+# 接口口径: 本接口不经网关、不鉴权（无 Authorization），因此不配置 token；
+#          空值校准字段对应的用例在运行时 skip 并给出回填指引
 
 path: "/quote/price_sync"
 
-auth:
-  # Bearer Token 的环境变量名。设置了名字但环境变量为空 → 全部用例 skip（接口要求鉴权）
-  token_env: "TEST_LSP_QUOTE_TOKEN"
-
 expected:
   http_status_ok: 200
-  # §6 错误码表仅定义 200=成功，负向统一断言 code != "200"（R-002 闭环前唯一可执行口径）
+  # §6 错误码表：200=成功；参数校验/策略非法/计算失败/无价卡/未知仓库等统一 HTTP 500 + code="500"
   code_success: "200"
+  http_status_fail: 500
+  code_fail: "500"
 
 master_data:
   owner_id: "BG"
   warehouse_code: "BG03"
+  # 发件 zone：lsp_warehouse.from_facility 实查值（BG03 → MEL），价卡按 from_zone→to_zone 取段
+  warehouse_zone: "MEL"
   warehouse_address:
     country: "AU"
     state: "VIC"
@@ -24,13 +25,39 @@ master_data:
     postcode: "3012"
     address1: "C 35-77 Emu Road"
     address2: ""
-  # lsp_carrier.id 实查值（REQ §4）
-  carrier_pro_id: "CAR2025062611067266788"     # AU.TGE.PRIORITY.PRO (fuel 0.2861)
-  carrier_base_id: "CAR1772558358570467346"    # AU.TGE.PRIORITY (fuel 0.097)
-  # ⚠ 校准点1: 需按 lsp_carrier_rate 实查一个"无有效价卡"的承运商 id 回填（TC-QPS-012）
+  # lsp_carrier.id 实查值（REQ §4）；仅取 carrier_agent_code in ('ubi','broers') 且 status=100
+  # 金额断言只做 PRO（2026-11-23 用户口径）：PRO 价卡 MEL→SYD 为 0.001-1/1.001-3/3.001-5/5.001+ 四段，
+  #   与需求 §7「首重 5kg + 续重 per_kg」完全一致，可 SQL 现算；其余承运商只参与比价择优，不断言金额。
+  carrier_pro_id: "CAR2025062611067266788"     # ubi / AU.TGE.PRIORITY.PRO（fuel 0.2861）
+  # base=aramex：范围最低价（1.15kg 实测 5.724），用于 isBest／排序／多承运商比价；
+  #   其 >5kg 为平台价 8.14 不随重量变化，故不做金额现算。
+  carrier_base_id: "CAR1772558358570467341"    # ubi / UBI Aramex Direct Freight
+  # 老承运商（calcMode 1/2 内部择优）：IPEC 实测 1.15kg 与 6kg 均为 19.074（不按重量分段），
+  #   只用于 AC-27 择优行为校验，不做金额现算。
+  carrier_legacy_id: "CAR1772558358570467347"  # ubi / UBI.AU2AU.IPEC
+  # 校准点1（2026-11-23 复核后置空）: 真实策略不会选到无价卡承运商；
+  #   VIR 强制指定无 rate 行承运商（如 CAR1002025051300000001）实测返回 200 + shippingCost=0.0，
+  #   是被 VIR 绕过策略过滤的人为场景，不作为「无价卡」用例依据。为空时相关用例 skip。
   carrier_no_rate_id: ""
-  # ⚠ 校准点2: 澳邮承运商 id（PO Box 用例 TC-QPS-011），从 lsp_carrier 实查回填
-  au_post_carrier_id: ""
+  # 校准点5（同置空）: 无真实第二个无价卡承运商场景，保留键位供后续构造夹具时回填
+  carrier_no_rate_id_2: ""
+  # 策略编码（AC-10）：lsp_carrier_strategy.code 实查值（CS000000015 wms-quote-price）
+  strategy_code: "quote_price"
+  # 承运商范围（2026-11-23 用户指定）: carrier_agent_code in ('ubi','broers') AND status=100，实查 8 家
+  #   策略 quote_price 另绑定 dfe/shippit，运行期会额外返回 4 家（CAR1772558358570467350 及 3 家 shippit），
+  #   按本次测试范围不计入比价断言，TC-QPS-028 仅对以下 8 家做范围校验并对范围外行告警。
+  strategy_refs:
+    - "CAR1770610202510160001"   # ubi / Australia Post N Parcel Post
+    - "CAR1770610202510160002"   # ubi / Australia Post N Express Post
+    - "CAR1770610202510160003"   # ubi / Australia Post Y Parcel Post
+    - "CAR1770610202510160004"   # ubi / Australia Post Y Express Post
+    - "CAR1772558358570467341"   # ubi / UBI Aramex Direct Freight
+    - "CAR1772558358570467347"   # ubi / UBI Team Global Express Standard（legacy）
+    - "CAR2025062611067266788"   # ubi / UBI Team Global Express Priority（pro）
+    - "CAR1770625562872602626"   # broers / Hunter Road Freight
+  # 校准点7（2026-11-23 已回填）: 绑定空承运商集合的策略（CS000000003 eiz，refs=0、filter 为空）
+  #   实测返回 HTTP 200 + code="500" + msg="No available carrier"
+  strategy_empty_code: "eiz"
 
 # 目的地（派件地）。zone 由 lsp_carrier_zone 按 postcode 实查，禁止按城市名推断（REQ §5）
 destinations:
@@ -41,35 +68,113 @@ destinations:
     postcode: "2000"
     address1: "456 George Street"
     address2: ""
-  # ⚠ 校准点3: 与 dest_a 映射到不同 zone 的第二个目的地（TC-QPS-004），
-  #    从 lsp_carrier_zone 按 carrier_id 实查另一 postcode 后回填；为空则该用例 skip
-  dest_b: {}
+  # 校准点3（2026-11-23 已回填）: 与 dest_a（2000→SYD）不同 zone 的目的地，
+  #   lsp_carrier_zone 实查 3000 → MEL；base 承运商 MEL→MEL fee=6.12（dest_a 为 MEL→SYD fee=7.87）
+  dest_b:
+    country: "AU"
+    state: "VIC"
+    suburb: "Melbourne"
+    postcode: "3000"
+    address1: "1 Bourke Street"
+    address2: ""
 
 # 业务阈值（REQ §7），断言与用例共用，改阈值只需改这里
 rules:
   basic_limit_kg: 5          # ≤5kg 取 Basic 首重 fee；>5kg 叠加 per_kilogram_fee
   max_side_cm: 120           # 最长边上限（> 为不可发）
   max_sum_cm: 120            # 三边之和上限（> 为不可发）
-  max_weight_kg: 22          # 称重上限（> 为不可发）
+  max_weight_kg: 22          # 原始称重上限（> 为不可发；按向上取整前判定）
 
-# 验证 SQL 模板（金额"现算现比"口径，评审 4+补）
-# ⚠ 校准点4: 列名/表名需按 lsp_scp 实际 schema 校准后再跑 db 用例；
-#    zone_rate 必须返回 fee / per_kilogram_fee / fuel_rate 三列
+# 验证 SQL 模板（金额"现算现比"口径）
+# 校准点4（2026-11-23 已按 lsp_scp 实际 schema 校准）:
+#   lsp_carrier_zone  → zone 列名为 `zone`（无 zone_code）
+#   lsp_carrier_rate  → from_zone / to_zone / min_weight / max_weight（无 zone_code / weight_from / weight_to）
+#   价卡必须同时按 from_zone（发件仓 zone）与 to_zone（派件 zone）定位，否则同一承运商存在多条同名 to_zone 价卡
 sql:
-  # 参数: %(carrier_id)s %(postcode)s %(weight)s —— zone 段 + 称重段联合取价卡
+  # 参数: %(carrier_id)s %(from_zone)s %(postcode)s %(weight)s —— 发件 zone + 派件 zone + 称重段联合取价卡
   zone_rate: >-
     SELECT r.fee, r.per_kilogram_fee, r.fuel_rate
     FROM lsp_carrier_zone z
     JOIN lsp_carrier_rate r
       ON r.carrier_id = %(carrier_id)s
-     AND r.zone_code = z.zone_code
+     AND r.from_zone = %(from_zone)s
+     AND r.to_zone = z.zone
+     AND r.status = 100
     WHERE z.postcode = %(postcode)s
-      AND %(weight)s > r.weight_from
-      AND %(weight)s <= r.weight_to
+      AND z.status = 100
+      AND %(weight)s > r.min_weight
+      AND %(weight)s <= r.max_weight
     LIMIT 1
-  # 参数: %(request_id)s —— 幂等/副作用断言用（M-13 清理策略：requestId 唯一即天然隔离）
+  # 参数: %(request_id)s —— 任务行数（不幂等用例：相同 request_id+order_code 两次调用应为 2）
   task_count_by_request: >-
     SELECT COUNT(*) AS cnt FROM lsp_quote_task WHERE request_id = %(request_id)s
+  # 参数: %(request_id)s %(order_code)s —— 按 request_id+order_code 统计任务数（AC-45 不幂等）
+  # 落库 order_code 会在入参后追加「-6位序号」（实测 TESTSO...-000951），故按前缀匹配
+  task_count_by_request_order: >-
+    SELECT COUNT(*) AS cnt FROM lsp_quote_task
+    WHERE request_id = %(request_id)s
+      AND LEFT(order_code, CHAR_LENGTH(%(order_code)s)) = %(order_code)s
+  # 参数: %(request_id)s %(status)s —— 按状态统计任务数（300=失败行，AC-23/27/32/50/51/52）
+  task_status_count_by_request: >-
+    SELECT COUNT(*) AS cnt FROM lsp_quote_task
+    WHERE request_id = %(request_id)s AND status = %(status)s
+  # 参数: %(request_id)s —— 成功计费任务数（lsp_quote_task.status: 200=成功 / 300=失败 / 100=进行中）
+  task_success_count_by_request: >-
+    SELECT COUNT(*) AS cnt FROM lsp_quote_task WHERE request_id = %(request_id)s AND status = 200
   # 参数: %(order_code)s
   task_count_by_order: >-
     SELECT COUNT(*) AS cnt FROM lsp_quote_task WHERE order_code = %(order_code)s
+  # 参数: %(order_code)s —— 不传 requestId 时按业务键统计成功任务（AC-06）
+  # 落库 order_code 带「-6位序号」后缀，按前缀匹配
+  task_success_count_by_order: >-
+    SELECT COUNT(*) AS cnt FROM lsp_quote_task
+    WHERE LEFT(order_code, CHAR_LENGTH(%(order_code)s)) = %(order_code)s AND status = 200
+  # 参数: %(request_id)s —— 任务明细（AC-49 必断：status/predict_price/predict_carrier_code/predict_calc_mode）
+  task_rows_by_request: >-
+    SELECT id, request_id, order_code, status, predict_price, predict_carrier_code, predict_calc_mode
+    FROM lsp_quote_task WHERE request_id = %(request_id)s ORDER BY id
+  # 参数: %(request_id)s —— 计费地址快照（AC-49：恰 2 行；AC-42：state 落库简称）
+  address_rows_by_request: >-
+    SELECT a.type, a.country, a.state, a.suburb, a.postcode
+    FROM lsp_quote_task_address a
+    JOIN lsp_quote_task t ON t.id = a.quote_task_id
+    WHERE t.request_id = %(request_id)s
+    ORDER BY a.type
+  # 参数: %(request_id)s —— 计费包裹行数（AC-49：= 请求包裹数）
+  package_count_by_request: >-
+    SELECT COUNT(*) AS cnt
+    FROM lsp_quote_task_package p
+    JOIN lsp_quote_task t ON t.id = p.quote_task_id
+    WHERE t.request_id = %(request_id)s
+  # 参数: %(request_id)s —— 计费 SKU 行数（AC-49：= 请求 SKU 明细行数）
+  package_sku_count_by_request: >-
+    SELECT COUNT(*) AS cnt
+    FROM lsp_quote_task_package_sku s
+    JOIN lsp_quote_task_package p ON p.id = s.quote_task_package_id
+    JOIN lsp_quote_task t ON t.id = p.quote_task_id
+    WHERE t.request_id = %(request_id)s
+  # 参数: %(request_id)s —— 计费日志表经 quote_task_id 关联（job_log 无 request_id 列）
+  job_log_count_by_request: >-
+    SELECT COUNT(*) AS cnt
+    FROM lsp_quote_task_job_log l
+    JOIN lsp_quote_task t ON t.id = l.quote_task_id
+    WHERE t.request_id = %(request_id)s
+
+# ── 测试数据清理（评审 R2-M05；脚本只读，清理为人工/定时任务执行） ──
+# 用例写入 5 张表，可识别前缀: order_code LIKE 'TESTSO%'
+#   （request_id 前缀 SAC 仅辅助识别；requestId 上界用例为 R*64，故只按 order_code 清理）
+# 按外键顺序删除（SKU → 包裹 → 日志 → 地址 → 任务）:
+#   DELETE s FROM lsp_quote_task_package_sku s
+#     JOIN lsp_quote_task_package p ON p.id = s.quote_task_package_id
+#     JOIN lsp_quote_task t ON t.id = p.quote_task_id
+#    WHERE t.order_code LIKE 'TESTSO%';
+#   DELETE p FROM lsp_quote_task_package p
+#     JOIN lsp_quote_task t ON t.id = p.quote_task_id
+#    WHERE t.order_code LIKE 'TESTSO%';
+#   DELETE l FROM lsp_quote_task_job_log l
+#     JOIN lsp_quote_task t ON t.id = l.quote_task_id
+#    WHERE t.order_code LIKE 'TESTSO%';
+#   DELETE a FROM lsp_quote_task_address a
+#     JOIN lsp_quote_task t ON t.id = a.quote_task_id
+#    WHERE t.order_code LIKE 'TESTSO%';
+#   DELETE FROM lsp_quote_task WHERE order_code LIKE 'TESTSO%';

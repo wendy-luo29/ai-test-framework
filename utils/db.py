@@ -41,6 +41,9 @@ class Database:
             connect_timeout=int(db.get("connect_timeout", 5)),
             read_timeout=int(db.get("read_timeout", 10)),
             cursorclass=pymysql.cursors.DictCursor,
+            # 只读断言连接必须开自动提交，否则 REPEATABLE READ 下模块级连接
+            # 会沿用首次查询的快照，读不到后续用例新落库的任务行
+            autocommit=True,
         )
         return cls(conn)
 

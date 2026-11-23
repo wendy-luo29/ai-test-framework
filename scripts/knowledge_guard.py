@@ -12,6 +12,7 @@
     D. gotchas/         NNN 编号唯一、文件名规范
     E. changelog/       必须有 change_id(s) 且能在 impact-index 找到对应条目
     F. knowledge/       内部 Markdown 相对链接死链（WARN）
+    G. testcases/*.yaml 与 tests/**/*.py 的 case_id 双向对齐
 
 用法：
     python scripts/knowledge_guard.py
@@ -126,6 +127,36 @@ def collect_case_ids() -> set[str]:
     return found
 
 
+def collect_script_case_ids() -> set[str]:
+    """从 tests/**/*.py 的 `# case_id:` 注释收集实际可执行用例编号。"""
+    found: set[str] = set()
+    tests_dir = ROOT / "tests"
+    if not tests_dir.is_dir():
+        return found
+    for path in tests_dir.rglob("*.py"):
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except OSError:
+            continue
+        found.update(CASE_ID_RE.findall(text))
+    return found
+
+
+def check_case_mapping(list_ids: set[str], script_ids: set[str]) -> None:
+    """用例清单与脚本双向对齐。
+
+    清单有、脚本无 → ERROR（回归索引会指向跑不了的用例）；
+    脚本有、清单无 → WARN（脚本未登记，报告无法关联 AC）。
+    """
+    if not list_ids and not script_ids:
+        warn("CASE-MAP", "testcases/*.yaml 与 tests/**/*.py 均未声明 case_id")
+        return
+    for cid in sorted(list_ids - script_ids):
+        err("CASE-MAP", f"用例清单中的 {cid} 在 tests/ 脚本里找不到 `# case_id:`，清单不可执行")
+    for cid in sorted(script_ids - list_ids):
+        warn("CASE-MAP", f"脚本中的 {cid} 未登记到 testcases/ 用例清单")
+
+
 def check_rules() -> None:
     if not RULES_DIR.is_dir():
         warn("RULES", "knowledge/rules/ 不存在")
@@ -216,9 +247,14 @@ def check_index(index: dict, case_ids: set[str]) -> set[str]:
         else:
             ids.add(str(cid))
 
-        for field in ("module", "feature", "date", "type", "regression_targets"):
+        for field in ("module", "feature", "date", "type"):
             if not change.get(field):
                 err("INDEX", f"{where} 缺少字段 {field}")
+        if not change.get("regression_targets") and not change.get("coverage_gap"):
+            err(
+                "INDEX",
+                f"{where} 缺少 regression_targets（无自动化用例时必须用 coverage_gap 说明原因）",
+            )
 
         if change.get("date") and parse_date(change["date"]) is None:
             err("INDEX", f"{where} date 非法：{change['date']!r}")
@@ -323,8 +359,10 @@ def main() -> int:
     check_rules()
     check_gotchas()
     index = load_index()
-    case_ids = collect_case_ids()
-    index_ids = check_index(index, case_ids)
+    list_ids = collect_case_ids()
+    script_ids = collect_script_case_ids()
+    check_case_mapping(list_ids, script_ids)
+    index_ids = check_index(index, list_ids or script_ids)
     check_changelog(index_ids, index)
     check_links()
 

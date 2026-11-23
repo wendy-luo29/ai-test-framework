@@ -5,7 +5,15 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
-  workflow_dispatch: # 这里保留了你刚加的手动触发
+  workflow_dispatch:
+
+# 说明：
+# 托管 runner 无法访问内网被测环境（192.168.x.x），因此 CI 只做"能离线验证"的部分：
+#   1. 知识库一致性（严格模式，任何告警都阻断）
+#   2. 用例可收集（导入错误、marker 未注册会在这里暴露）
+#   3. 离线 demo 冒烟（验证 pytest + Playwright 链路本身可用）
+# 真实 API/UI 回归请在能访问被测环境的自建 runner 上执行：
+#   python -m pytest tests -m "api or (ui and not smoke)" --junitxml=reports/junit.xml
 
 jobs:
   test:
@@ -22,24 +30,39 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Validate knowledge base
-        run: python scripts/knowledge_guard.py
+      - name: Install Playwright browsers
+        run: python -m playwright install --with-deps chromium
 
-      # 新增步骤：启动一个假的本地服务器供测试使用
-      - name: Start local mock server
-        run: |
-          python -m http.server 8000 &
-          sleep 2
+      - name: Validate knowledge base (strict)
+        run: python scripts/knowledge_guard.py --strict
 
-      # 运行测试并生成 junit + html 报告（失败也继续后续发送步骤）
-      - name: Run tests
-        env:
-          CI_API_URL: "http://127.0.0.1:8000" # 告诉测试代码用本地回环地址
+      - name: Verify test collection
+        run: python -m pytest --collect-only -q
+
+      - name: Run offline smoke
         run: |
           mkdir -p reports
-          python -m pytest tests -v \
+          python -m pytest tests/ui/test_example_home.py -v \
             --junitxml=reports/junit.xml \
             --html=reports/report.html --self-contained-html
+
+      - name: Enforce effective execution
+        run: |
+          python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          cases = list(ET.parse("reports/junit.xml").getroot().iter("testcase"))
+          executed = [
+              c for c in cases
+              if c.find("failure") is None and c.find("error") is None and c.find("skipped") is None
+          ]
+          skipped = [c for c in cases if c.find("skipped") is not None]
+          print(f"total={len(cases)} executed={len(executed)} skipped={len(skipped)}")
+          if not executed:
+              print("::error::没有任何实际执行的用例，全部 skip 不算通过")
+              sys.exit(1)
+          PY
 
       - name: Upload test report
         id: report

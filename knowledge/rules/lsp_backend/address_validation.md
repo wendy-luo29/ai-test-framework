@@ -5,6 +5,7 @@ version: v2.1
 status: active
 confirmed_by: 业务方
 confirmed_date: 2026-11-15
+source_requirement: requirements/specs/lsp_backend/address_validation/all.v2.1.0.json
 related_cases: [TC-ADDR-001, TC-ADDR-002, TC-ADDR-003]
 related_gotchas: [gotcha_001, gotcha_002]
 ---
