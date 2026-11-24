@@ -1,0 +1,92 @@
+bug_id: BUG-REQ002-D09
+title: "VIR 携带不存在的 carrierId 被静默忽略，仍返回有效承运商报价"
+severity: 中
+priority: P2
+requirement: "REQ-002 承运商运费计算同步（/quote/price_sync）"
+status: 新建
+discovered_version: "dev 环境当前版本（2026-11-23 实测，2026-11-24 回归仍在）"
+reporter: "wendy"
+reported_at: "2026-11-24"
+
+environment:
+  name: dev
+  base_url: "http://192.168.1.71:13100"
+
+api:
+  method: POST
+  path: "/quote/price_sync"
+
+request:
+  body:
+    requestId: "SAC17954331326055123"
+    orderCode: "TESTSO20261123009"
+    ownerId: "BG"
+    carrierStrategyCode: "VIR|CAR1772558358570467346|CAR-NOT-EXIST-000000"
+    shipTo:
+      country: "AU"
+      state: "NSW"
+      suburb: "Haymarket"
+      postcode: "2000"
+      address1: "456 George Street"
+      address2: ""
+    warehouse:
+      - warehouseCode: "BG03"
+        shipmentCode: "TS20261123009"
+        packages:
+          - packageCode: "QTP20261123009"
+            length: 30
+            width: 20
+            height: 15
+            weight: 1.15
+            items:
+              - sku: "SKU-001"
+                qty: 1
+                length: 30
+                width: 20
+                height: 15
+                weight: 1.15
+    isPushWms: 200
+    pushResultTo: 200
+    closePoboxCheck: 200
+  headers:
+    Content-Type: "application/json"
+
+response:
+  status: "HTTP 200"
+  body:
+    code: "200"
+    msg: "success"
+    success: true
+    data:
+      - shippingCost: 5.724
+        bookingCarrierId: "CAR1772558358570467346"
+    lsp_quote_task:
+      request_id: "SAC17954331326055123"
+      status: 200
+
+expected:
+  ac: "AC-39"
+  rule: "需求 Q-014：VIR 段 carrierId 不存在应返回统一失败契约（code=\"500\"）且不落任务行"
+  actual_vs_expected: "实测 code=\"200\"，不存在的 carrierId 被静默剔除后仍返回 Aramex 5.724，落库 status=200"
+
+related_cases:
+  - case_id: "TC-QPS-014"
+    title: "异常与落库：VIR 中不存在 carrierId → 500 且不落行（参数化 unknown-carrier 条目，xfail）"
+    ac: "AC-39"
+    priority: P2
+    source: "tests/api/test_quote_price_sync.py"
+
+analysis:
+  phenomenon: "VIR 策略编码中的非法 carrierId 被剔除，剩余有效承运商照常计费"
+  direct_cause: "承运商 ID 解析时对查不到主数据的 ID 做静默过滤而非报错"
+  root_cause: "VIR 段解析缺少 ID 存在性校验：需求要求整体失败，实现按\"能算几个算几个\"容错处理"
+  evidence: "REQ-002-defects.md D-09（2026-11-23 实测，requestId=SAC17954331326055123 落库 status=200）；2026-11-24 回归 xfail 证实仍在（reports/junit_quote_price_sync.xml）"
+  pending: "无"
+
+impact:
+  scope: "上层传错的 carrierId 不会被察觉，比价范围悄然缩小，最优结果可能失真"
+  frequency: "稳定复现"
+
+suggestion:
+  fix: "VIR 段逐个校验 carrierId 存在性，任一不存在按统一失败契约拒绝且不落任务行"
+  regression: "TC-QPS-014 全量回归"

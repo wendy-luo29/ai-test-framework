@@ -1,0 +1,88 @@
+bug_id: BUG-REQ002-D10
+title: "orderCode=32 字符（需求上界）落库追加 6 位序号后超 varchar(32) 列宽"
+severity: 中
+priority: P2
+requirement: "REQ-002 承运商运费计算同步（/quote/price_sync）"
+status: 新建
+discovered_version: "dev 环境当前版本（2026-11-24 本轮实测）"
+reporter: "wendy"
+reported_at: "2026-11-24"
+
+environment:
+  name: dev
+  base_url: "http://192.168.1.71:13100"
+
+api:
+  method: POST
+  path: "/quote/price_sync"
+
+request:
+  body:
+    requestId: "SAC17954980000000001"
+    # 32 字符恰好上界（TESTSO + 时间戳补齐）
+    orderCode: "TESTSO20261124140000000XXXXXXXXXX"
+    ownerId: "BG"
+    carrierStrategyCode: "VIR|CAR2025062611067266788"
+    shipTo:
+      country: "AU"
+      state: "NSW"
+      suburb: "Haymarket"
+      postcode: "2000"
+      address1: "456 George Street"
+      address2: ""
+    warehouse:
+      - warehouseCode: "BG03"
+        shipmentCode: "TS20261124001"
+        packages:
+          - packageCode: "QTP20261124001"
+            length: 30
+            width: 20
+            height: 15
+            weight: 1.15
+            items:
+              - sku: "SKU-001"
+                qty: 1
+                length: 30
+                width: 20
+                height: 15
+                weight: 1.15
+    isPushWms: 200
+    pushResultTo: 200
+    closePoboxCheck: 200
+  headers:
+    Content-Type: "application/json"
+
+response:
+  status: "HTTP 200"
+  body:
+    code: "200"
+    msg: "success"
+    success: true
+    note: "接口层成功；落库 lsp_quote_task.order_code 追加「-6位序号」后达 39 字符，超出 varchar(32) 列宽（截断或写失败）"
+
+expected:
+  ac: "AC-07"
+  rule: "需求 AC-07：orderCode=32 字符恰好上界应成功计费、不因长度误拒；落库实现需与需求上限自洽"
+  actual_vs_expected: "需求允许 32 字符，但落库实现叠加「-6 位序号」后超出 lsp_quote_task.order_code varchar(32)，需求上限与落库实现冲突"
+
+related_cases:
+  - case_id: "TC-QPS-035"
+    title: "契约-长度校验：orderCode=32 恰好上界（参数化 orderCode 条目，xfail）"
+    ac: "AC-07"
+    priority: P2
+    source: "tests/api/test_quote_price_sync.py"
+
+analysis:
+  phenomenon: "orderCode 恰好 32 字符（合法上界）请求在落库环节失败"
+  direct_cause: "落库时 order_code 列值 = 入参 orderCode + 「-6 位序号」，39 字符 > 列宽 varchar(32)"
+  root_cause: "需求（orderCode ≤32）与落库设计（追加 6 位序号且列宽 32）相互冲突，两侧均未为对方留出余量"
+  evidence: "2026-11-24 回归 test_length_at_upper_bound[orderCode] xfail（reports/junit_quote_price_sync.xml）；本轮新增记录，REQ-002-defects.md 此前未收录"
+  pending: "需求方确认口径：扩列宽 / 落库不追加序号 / 收紧需求上界到 26 字符，三选一后对齐实现与用例"
+
+impact:
+  scope: "恰好上界的合法 orderCode 无法完整落库；相邻长度（26~32 字符）均可能受影响"
+  frequency: "稳定复现"
+
+suggestion:
+  fix: "按需求确认结果三选一：lsp_quote_task.order_code 扩到 varchar(40)；或落库改为复用入参 orderCode 不追加序号；或需求收紧 orderCode 上界，同步更新 AC-07 与用例"
+  regression: "TC-QPS-035/TC-QPS-036 长度相关用例全量回归"

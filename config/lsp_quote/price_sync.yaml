@@ -133,6 +133,25 @@ sql:
   task_rows_by_request: >-
     SELECT id, request_id, order_code, status, predict_price, predict_carrier_code, predict_calc_mode
     FROM lsp_quote_task WHERE request_id = %(request_id)s ORDER BY id
+  # 参数: %(order_code_prefix)s —— 按 order_code 前缀取任务明细（多实例批量断言）
+  task_rows_by_order_prefix: >-
+    SELECT id, request_id, order_code, status, predict_price, predict_carrier_code, predict_calc_mode
+    FROM lsp_quote_task
+    WHERE LEFT(order_code, CHAR_LENGTH(%(order_code_prefix)s)) = %(order_code_prefix)s
+    ORDER BY id
+  # 参数: %(request_id)s —— SKU 明细（TC-QPS-038：组包 qty 展开后 qty 落库）
+  sku_rows_by_request: >-
+    SELECT s.sku, s.qty, s.length, s.width, s.height, s.weight
+    FROM lsp_quote_task_package_sku s
+    JOIN lsp_quote_task_package p ON p.id = s.quote_task_package_id
+    JOIN lsp_quote_task t ON t.id = p.quote_task_id
+    WHERE t.request_id = %(request_id)s
+    ORDER BY s.id
+  # 参数: %(code)s —— 仓库发件 zone（TC-QPS-042：BGS1 → SYD）
+  warehouse_from_zone: >-
+    SELECT from_facility FROM lsp_warehouse
+    WHERE code = %(code)s AND status = 100
+    LIMIT 1
   # 参数: %(request_id)s —— 计费地址快照（AC-49：恰 2 行；AC-42：state 落库简称）
   address_rows_by_request: >-
     SELECT a.type, a.country, a.state, a.suburb, a.postcode

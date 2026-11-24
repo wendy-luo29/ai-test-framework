@@ -1,0 +1,102 @@
+bug_id: BUG-REQ002-D01
+title: "失败响应 code 不稳定：必填缺失/字段超长返回 400、策略为空返回 null，未统一 500"
+severity: 高
+priority: P1
+requirement: "REQ-002 承运商运费计算同步（/quote/price_sync）"
+status: 新建
+discovered_version: "dev 环境当前版本（2026-11-23 实测，2026-11-24 回归仍在）"
+reporter: "wendy"
+reported_at: "2026-11-24"
+
+environment:
+  name: dev
+  base_url: "http://192.168.1.71:13100"
+
+api:
+  method: POST
+  path: "/quote/price_sync"
+
+request:
+  body:
+    requestId: "SAC17954331872020001"
+    # 本例触发点：ownerId 缺失（17 个必填字段逐个移除场景之一）
+    orderCode: "TESTSO20261123001"
+    carrierStrategyCode: "VIR|CAR2025062611067266788|CAR1772558358570467346"
+    shipTo:
+      country: "AU"
+      state: "NSW"
+      suburb: "Haymarket"
+      postcode: "2000"
+      address1: "456 George Street"
+      address2: ""
+    warehouse:
+      - warehouseCode: "BG03"
+        shipmentCode: "TS20261123001"
+        packages:
+          - packageCode: "QTP20261123001"
+            length: 30
+            width: 20
+            height: 15
+            weight: 1.15
+            items:
+              - sku: "SKU-001"
+                qty: 1
+                length: 30
+                width: 20
+                height: 15
+                weight: 1.15
+    isPushWms: 200
+    pushResultTo: 200
+    closePoboxCheck: 200
+  headers:
+    Content-Type: "application/json"
+
+response:
+  status: "HTTP 400（部分场景 200，按响应体 code 判定）"
+  body:
+    code: "400"
+    msg: "（实测返回业务码 400，非需求要求的 500；完整报文见 reports/report.html 对应用例）"
+    success: false
+    data: null
+
+expected:
+  ac: "AC-44（关联 AC-05/AC-07/AC-12）"
+  rule: "需求 §6/AC-44：失败统一返回 code=\"500\" + msg 非空 + data=null；HTTP 状态码视为传输层"
+  actual_vs_expected: "必填缺失实测 code=\"400\"；orderCode=33 字符实测 code=\"400\"；策略为空实测 code=null，与需求统一 500 不符"
+
+related_cases:
+  - case_id: "TC-QPS-013"
+    title: "契约-必填校验：逐个移除 17 个必填字段（参数化 17 条，全部 xfail）"
+    ac: "AC-44/AC-05"
+    priority: P1
+    source: "tests/api/test_quote_price_sync.py"
+  - case_id: "TC-QPS-036"
+    title: "契约-长度校验：各字段超上界 1 字符（参数化 14 条，全部 xfail）"
+    ac: "AC-07/AC-44"
+    priority: P1
+    source: "tests/api/test_quote_price_sync.py"
+  - case_id: "TC-QPS-037"
+    title: "契约-类型校验：packages 传对象（返回 HTTP 400 默认错误体，无 500 包装层）"
+    ac: "AC-44"
+    priority: P2
+    source: "tests/api/test_quote_price_sync.py"
+  - case_id: "TC-QPS-027"
+    title: "异常与落库：参数校验失败不落任务行（断言失败契约分支 xfail）"
+    ac: "AC-44/AC-50"
+    priority: P2
+    source: "tests/api/test_quote_price_sync.py"
+
+analysis:
+  phenomenon: "参数校验失败与业务失败的响应 code 各不相同：400、null、500 混用"
+  direct_cause: "参数校验分支（必填/长度/类型）未走统一异常处理器，返回 Spring 默认 400 或业务码 400；策略编码为空分支返回 code=null"
+  root_cause: "失败出口未收敛到统一响应契约（code=\"500\"+msg+data=null）：校验层、策略解析层、计费层各自拼装错误响应"
+  evidence: "REQ-002-defects.md D-01（2026-11-23 实测）；2026-11-24 回归 33 条相关用例 xfail 证实仍在（reports/junit_quote_price_sync.xml）"
+  pending: "无"
+
+impact:
+  scope: "所有失败场景的调用方无法按统一契约判断失败原因；下游按 code==500 判失败会漏判 400/null 分支"
+  frequency: "稳定复现"
+
+suggestion:
+  fix: "后端增加全局异常处理器，将参数校验失败与业务失败统一包装为 code=\"500\" + msg 非空 + data=null"
+  regression: "TC-QPS-013/019/027/035/036/037 全量回归"

@@ -1,0 +1,101 @@
+bug_id: BUG-REQ002-D03
+title: "同一请求 packageCode 重复仍成功，运费按重复包裹翻倍"
+severity: 中
+priority: P2
+requirement: "REQ-002 承运商运费计算同步（/quote/price_sync）"
+status: 新建
+discovered_version: "dev 环境当前版本（2026-11-23 实测，2026-11-24 回归仍在）"
+reporter: "wendy"
+reported_at: "2026-11-24"
+
+environment:
+  name: dev
+  base_url: "http://192.168.1.71:13100"
+
+api:
+  method: POST
+  path: "/quote/price_sync"
+
+request:
+  body:
+    requestId: "SAC17954331872020003"
+    orderCode: "TESTSO20261123003"
+    ownerId: "BG"
+    carrierStrategyCode: "VIR|CAR2025062611067266788"
+    shipTo:
+      country: "AU"
+      state: "NSW"
+      suburb: "Haymarket"
+      postcode: "2000"
+      address1: "456 George Street"
+      address2: ""
+    warehouse:
+      - warehouseCode: "BG03"
+        shipmentCode: "TS20261123003"
+        packages:
+          - packageCode: "QTP20261123003"
+            length: 30
+            width: 20
+            height: 15
+            weight: 2
+            items:
+              - sku: "SKU-001"
+                qty: 1
+                length: 30
+                width: 20
+                height: 15
+                weight: 2
+          - packageCode: "QTP20261123003"
+            length: 30
+            width: 20
+            height: 15
+            weight: 2
+            items:
+              - sku: "SKU-001"
+                qty: 1
+                length: 30
+                width: 20
+                height: 15
+                weight: 2
+    isPushWms: 200
+    pushResultTo: 200
+    closePoboxCheck: 200
+  headers:
+    Content-Type: "application/json"
+
+response:
+  status: "HTTP 200"
+  body:
+    code: "200"
+    msg: "success"
+    success: true
+    data:
+      - shippingCost: 60.036
+        bookingCarrierId: "CAR2025062611067266788"
+
+expected:
+  ac: "AC-37"
+  rule: "需求 AC-37：同一请求内 packageCode 重复应被拒绝（失败返回 + 不落任务行）"
+  actual_vs_expected: "两个包裹同 packageCode 返回成功，金额=2 倍单价（按重复包裹计费）"
+
+related_cases:
+  - case_id: "TC-QPS-021"
+    title: "契约-结构校验：packageCode 重复（参数化 duplicate-packageCode 条目）"
+    ac: "AC-37"
+    priority: P2
+    source: "tests/api/test_quote_price_sync.py"
+
+analysis:
+  phenomenon: "重复 packageCode 未去重也未拒绝，按 2 个独立包裹计费"
+  direct_cause: "缺少同一请求内 packageCode 唯一性校验"
+  root_cause: "包裹集合入参未做唯一键校验，重复包裹被当作正常多包裹参与逐包计费求和"
+  evidence: "REQ-002-defects.md D-03（2026-11-23 实测）；2026-11-24 回归 xfail 证实仍在（reports/junit_quote_price_sync.xml）"
+  pending: "无"
+
+impact:
+  scope: "运费重复计算，报价金额虚高；重复包裹行落库造成数据冗余"
+  frequency: "稳定复现"
+
+suggestion:
+  fix: "同一 warehouse.shipment 内 packageCode 唯一性校验，重复按参数校验失败统一拒绝"
+  regression: "TC-QPS-021 全量回归"

@@ -48,7 +48,7 @@ def summarize(junit: Path) -> dict:
 
     cases = list(ET.parse(junit).getroot().iter("testcase"))
     failed: list[str] = []
-    skipped = passed = 0
+    skipped = xfailed = passed = 0
 
     for case in cases:
         name = case.get("name", "unknown")
@@ -57,7 +57,11 @@ def summarize(junit: Path) -> dict:
         if case.find("failure") is not None or case.find("error") is not None:
             failed.append(label)
         elif case.find("skipped") is not None:
-            skipped += 1
+            skipped_el = case.find("skipped")
+            if (skipped_el.get("type") or "") == "pytest.xfail":
+                xfailed += 1
+            else:
+                skipped += 1
         else:
             passed += 1
 
@@ -68,6 +72,7 @@ def summarize(junit: Path) -> dict:
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
+        "xfailed": xfailed,
         "duration": duration,
         "effective_rate": executed / len(cases) * 100 if cases else 0.0,
         "pass_rate": passed / executed * 100 if executed else 0.0,
@@ -123,7 +128,7 @@ def build_blocks(
                 "text": (
                     f"结果：总计 {stats['total']} ｜ 通过 {stats['passed']} ｜ "
                     f"失败 {len(stats['failed'])} ｜ 跳过 {stats['skipped']} ｜ "
-                    f"耗时 {stats['duration']:.2f}s"
+                    f"已知缺陷(xfail) {stats['xfailed']} ｜ 耗时 {stats['duration']:.2f}s"
                 ),
             }
         ],
@@ -200,25 +205,39 @@ def send(webhook: str, payload: dict) -> None:
         raise SystemExit(f"飞书返回错误：code={code}, msg={body.get('msg', body)}")
 
 
-def resolve_env_name() -> str:
-    if os.getenv("TEST_ENV"):
-        return os.environ["TEST_ENV"]
+def detect_suite(junit: Path) -> tuple[str, str]:
+    """按 junit 中首个 testcase 的类名匹配 config.base.yaml 的 report.suites。"""
     try:
         from config.config_loader import get_value
 
-        return str(get_value("env_name") or get_value("api_base_url") or "本地（未配置 api_base_url）")
+        registry = get_value("report.suites", {}) or {}
+        for case in ET.parse(junit).getroot().iter("testcase"):
+            classname = case.get("classname", "")
+            for key, meta in registry.items():
+                if key in classname:
+                    return str(meta.get("module") or ""), str(meta.get("feature") or "")
     except Exception:
-        return "未知环境"
+        pass
+    return "", ""
 
 
-def resolve_api_path() -> str:
-    """接口地址只取接口路径（去掉服务地址），如 /address/validate。"""
+def resolve_target(junit: Path, api_path: str = "", env_url: str = "") -> tuple[str, str]:
+    """返回 (环境地址, 接口路径)：优先显式参数，其次按测试类名匹配配置。"""
     try:
-        from config.config_loader import get_value
+        from config.config_loader import get_module_config, get_service_url, get_value
 
-        return str(get_value("address_validation.path") or "")
+        module, feature = detect_suite(junit)
+        if module:
+            cfg = get_module_config(module, feature)
+            path = api_path or str(cfg.get("path") or "")
+            url = env_url or get_service_url(module, cfg)
+            return url or "未知环境", path
+
+        path = api_path or str(get_value("address_validation.path") or "")
+        url = env_url or str(get_value("api_base_url") or "")
+        return url or "未知环境", path
     except Exception:
-        return ""
+        return env_url or "未知环境", api_path
 
 
 def main() -> int:
@@ -231,20 +250,26 @@ def main() -> int:
         help="缺陷 Excel 路径，默认自动取 reports/bugs 下最新 xlsx",
     )
     parser.add_argument("--report-url", default=os.getenv("REPORT_URL", ""), help="报告链接")
+    parser.add_argument("--api-path", default=os.getenv("TEST_API_PATH", ""),
+                        help="接口路径，默认按测试类名从 report.suites 匹配")
+    parser.add_argument("--env-url", default=os.getenv("TEST_API_URL", ""),
+                        help="环境地址，默认按匹配到的模块取 services.<module>.<env>")
     parser.add_argument("--webhook", default=os.getenv("FEISHU_WEBHOOK", ""), help="覆盖 FEISHU_WEBHOOK")
     parser.add_argument("--dry-run", action="store_true", help="只打印不发送")
     args = parser.parse_args()
 
-    stats = summarize(Path(args.junit))
+    junit = Path(args.junit)
+    stats = summarize(junit)
     report = resolve_report(Path(args.report).expanduser().resolve())
     bug_files = collect_bug_xlsx(args.bug_xlsx, DEFAULT_BUG_DIR)
+    env_name, api_path = resolve_target(junit, args.api_path, args.env_url)
     blocks = build_blocks(
         stats,
         report,
         bug_files,
         args.report_url,
-        resolve_env_name(),
-        resolve_api_path(),
+        env_name,
+        api_path,
     )
 
     if args.dry_run:

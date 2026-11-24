@@ -1,0 +1,90 @@
+bug_id: BUG-REQ002-D07
+title: "同时传 carrierIds 与 carrierStrategyCode 时 carrierIds 仍优先生效"
+severity: 中
+priority: P2
+requirement: "REQ-002 承运商运费计算同步（/quote/price_sync）"
+status: 新建
+discovered_version: "dev 环境当前版本（2026-11-23 实测，2026-11-24 回归仍在）"
+reporter: "wendy"
+reported_at: "2026-11-24"
+
+environment:
+  name: dev
+  base_url: "http://192.168.1.71:13100"
+
+api:
+  method: POST
+  path: "/quote/price_sync"
+
+request:
+  body:
+    requestId: "SAC17954331872020007"
+    orderCode: "TESTSO20261123007"
+    ownerId: "BG"
+    carrierStrategyCode: "VIR|CAR2025062611067266788"
+    carrierIds:
+      - "CAR1772558358570467346"
+    shipTo:
+      country: "AU"
+      state: "NSW"
+      suburb: "Haymarket"
+      postcode: "2000"
+      address1: "456 George Street"
+      address2: ""
+    warehouse:
+      - warehouseCode: "BG03"
+        shipmentCode: "TS20261123007"
+        packages:
+          - packageCode: "QTP20261123007"
+            length: 30
+            width: 20
+            height: 15
+            weight: 1.15
+            items:
+              - sku: "SKU-001"
+                qty: 1
+                length: 30
+                width: 20
+                height: 15
+                weight: 1.15
+    isPushWms: 200
+    pushResultTo: 200
+    closePoboxCheck: 200
+  headers:
+    Content-Type: "application/json"
+
+response:
+  status: "HTTP 200"
+  body:
+    code: "200"
+    msg: "success"
+    success: true
+    data:
+      - bookingCarrierId: "CAR1772558358570467346"
+
+expected:
+  ac: "AC-43"
+  rule: "需求 Q-014/C-15：接口层只认 carrierStrategyCode，carrierIds 仅兼容保留、不参与选承运商"
+  actual_vs_expected: "双向实测均以 carrierIds 为准：VIR|PRO + carrierIds=[Aramex] → 返回 Aramex；VIR|Aramex + carrierIds=[PRO] → 返回 PRO"
+
+related_cases:
+  - case_id: "TC-QPS-031"
+    title: "功能-比价：同时传 carrierIds 与 VIR|PRO → 只按策略返回 PRO（xfail）"
+    ac: "AC-43"
+    priority: P2
+    source: "tests/api/test_quote_price_sync.py"
+
+analysis:
+  phenomenon: "carrierIds 存在时覆盖 carrierStrategyCode 的选商结果"
+  direct_cause: "承运商选择逻辑仍优先读取 carrierIds 兼容字段"
+  root_cause: "V1.6 口径（接口层只认 carrierStrategyCode）未在选商代码路径落地，旧 carrierIds 优先级未降级"
+  evidence: "REQ-002-defects.md D-07（2026-11-23 双向实测）；2026-11-24 回归 xfail 证实仍在（reports/junit_quote_price_sync.xml）"
+  pending: "无"
+
+impact:
+  scope: "上层按策略下发请求时实际承运商与策略意图不一致，比价/最优结果失真"
+  frequency: "稳定复现"
+
+suggestion:
+  fix: "选商入口移除 carrierIds 优先级：仅当 carrierStrategyCode 为空时才按兼容逻辑兜底（或直接忽略 carrierIds）"
+  regression: "TC-QPS-031 + TC-QPS-036[carrierIds] 回归"
