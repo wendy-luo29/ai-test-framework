@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -64,6 +66,12 @@ jobs:
               sys.exit(1)
           PY
 
+      - name: Export Excel report
+        if: always()
+        env:
+          TEST_ENV: "GitHub Actions"
+        run: python scripts/export_test_report.py --no-writeback
+
       - name: Upload test report
         id: report
         if: always()
@@ -73,11 +81,4 @@ jobs:
           path: |
             reports/junit.xml
             reports/report.html
-
-      - name: Notify Feishu
-        if: always()
-        env:
-          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          REPORT_URL: ${{ steps.report.outputs.artifact-url }}
-          TEST_ENV: "GitHub Actions"
-        run: python scripts/send_report.py
+            reports/test-results_*.xlsx
