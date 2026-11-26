@@ -27,7 +27,7 @@ services:
     prod: ""
 
 # ── 报告元数据 ──
-# send_report.py 按 junit 中 testcase 的类名匹配，决定“环境 + 接口地址”
+# export_test_report.py 按 junit 中 testcase 的类名匹配，决定“环境 + 接口地址”
 report:
   suites:
     test_quote_price_sync:
@@ -36,6 +36,9 @@ report:
     test_address_validate:
       module: lsp_backend
       feature: address_validation
+  excel:
+    # 回写目标用例表；留空 → 自动在 testcases/**/*.xlsx 中按 case_id 命中率选择
+    testcase_xlsx: ""
 
 # ── 通用请求超时（秒） ──
 # 承运商特定超时在 carrier 配置里覆盖
