@@ -6,11 +6,11 @@ allure-results/
 *.log
 .env
 
-# Claude 配置目录：只跟踪 skills，忽略其余本地内容
+# Claude 配置目录：只保留 skills（公共库 submodule），忽略其余本地内容
 .claude/*
-!.claude/skills/
+!.claude/skills
+# skills 运行时产物由 qa-skills 仓自身的 .gitignore 管理
 
-# skills 下的运行时产物不入库
-.claude/skills/**/output/
-.claude/skills/**/workspaces/
-.claude/skills/**/db_config.json
+# 架构改造的本地备份与公共库暂存目录（不随项目仓提交）
+backup/
+_public-lib/
