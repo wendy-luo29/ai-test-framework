@@ -19,11 +19,11 @@
        - 未提供 --testcase-xlsx 且自动匹配不到时，只生成报告，不修改任何用例文件
 
 可选参数：
-    --junit reports/junit_quote_price_sync.xml
+    --junit reports/junit.xml
     --html reports/report.html
     --output reports/test-results_xxx.xlsx
-    --testcase-xlsx testcases/REQ-002-quote_price/output/api_testcases_xxx.xlsx
-    --requirement REQ-002          （限制自动发现的用例目录）
+    --testcase-xlsx testcases/REQ-xxx/output/api_testcases_xxx.xlsx
+    --requirement REQ-xxx          （限制自动发现的用例目录）
     --no-writeback                 （只出报告，不回写用例）
     --env-url / --api-path         （覆盖自动解析的环境与接口路径）
 """
@@ -1362,7 +1362,7 @@ def main() -> int:
         default="",
         help="要回写的用例 Excel；留空则按配置与 case_id 命中率自动发现",
     )
-    parser.add_argument("--requirement", default="", help="限制自动发现的需求目录，如 REQ-002")
+    parser.add_argument("--requirement", default="", help="限制自动发现的需求目录，如 REQ-xxx")
     parser.add_argument("--no-writeback", action="store_true", help="只生成报告，不回写用例")
     parser.add_argument("--env-url", default=os.getenv("TEST_API_URL", ""), help="覆盖环境地址")
     parser.add_argument("--api-path", default=os.getenv("TEST_API_PATH", ""), help="覆盖接口路径")

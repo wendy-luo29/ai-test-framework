@@ -6,11 +6,9 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
-from config.config_loader import get_config, get_module_config
+from config.config_loader import get_config
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -22,13 +20,5 @@ def require_api_environment():
         pytest.fail(
             f"API 被测环境未配置：services.lsp_quote.{env} 为空。"
             f"请在 config/base.yaml 填写该环境地址，或把 config/env.yaml 的 env 改到已配置环境。",
-            pytrace=False,
-        )
-
-    token_env = (get_module_config("lsp_quote", "price_sync").get("auth") or {}).get("token_env")
-    if token_env and not os.getenv(token_env):
-        pytest.fail(
-            f"鉴权 Token 未提供：环境变量 {token_env} 为空。"
-            f"REQ-002 接口要求 Bearer Token，缺失时不再逐条 skip。",
             pytrace=False,
         )
