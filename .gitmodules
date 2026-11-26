@@ -2,7 +2,7 @@
 	path = .claude/skills
 	url = https://github.com/wendy-luo29/qa-skills.git
 	branch = main
-[submodule "knowledge-base"]
-	path = vendor/knowledge-base
-	url = https://github.com/wendy-luo29/qa-knowledge-base.git
+[submodule "knowledge"]
+	path = knowledge
+	url = https://github.com/wendy-luo29/it-nas.git
 	branch = main
