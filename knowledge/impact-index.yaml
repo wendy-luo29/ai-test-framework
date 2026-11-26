@@ -4,7 +4,7 @@
 #
 # 维护规则：
 # 1. 每次规则/API/DB 变更 → 新增 change 条目（不是覆盖旧的）
-# 2. regression_targets 用 case_id（如 TC-QPS-001），必须同时存在于
+# 2. regression_targets 用 case_id（如 TC-ADDR-001），必须同时存在于
 #    testcases/*.yaml 与 tests/**/*.py 的 `# case_id:`，禁止幽灵回归项
 # 3. 确实没有自动化用例时，regression_targets 置空并填写 coverage_gap 说明缺口
 # 4. 历史条目保留，标记 status: superseded 即可
@@ -14,8 +14,8 @@
 changes:
   # ───────────────────────────────────────────────────────
   # CHG-001: 地址校验 v2.1 规则全面确认
-  # 缺口：地址校验尚无自动化脚本（tests/api 下只有 REQ-002 计费用例），
-  #       历史 TC-ADDR-* 编号为设计稿，未落脚本，已从回归目标移除。
+  # 缺口：地址校验尚无自动化脚本，历史 TC-ADDR-* 编号为设计稿，
+  #       未落脚本，已从回归目标移除。
   # ───────────────────────────────────────────────────────
   - id: CHG-001
     module: lsp_backend
@@ -125,56 +125,6 @@ changes:
       - knowledge/changelog/2026-11-20_quote_carrier_a_v2.md
     status: active
 
-  # ───────────────────────────────────────────────────────
-  # CHG-003: REQ-002 /quote/price_sync 进入自动化回归
-  # 回归目标与 testcases/REQ-002-TC-list.yaml、tests/api/test_quote_price_sync.py 对齐。
-  # ───────────────────────────────────────────────────────
-  - id: CHG-003
-    module: lsp_quote
-    feature: quote_price
-    field: POST /quote/price_sync
-    date: "2026-11-23"
-    type: new_feature
-    description: |
-      REQ-002 承运商运费计算同步接口自动化用例按需求 V1.6 对齐，
-      29 个用例覆盖 V1.6 AC 清单（002/003/011/015/018 已随范围变更删除，编号不回收）。
-    affected_carriers: [AU.TGE.PRIORITY, AU.TGE.PRIORITY.PRO]
-    regression_targets:
-      - TC-QPS-001
-      - TC-QPS-004
-      - TC-QPS-005
-      - TC-QPS-006
-      - TC-QPS-007
-      - TC-QPS-008
-      - TC-QPS-009
-      - TC-QPS-010
-      - TC-QPS-012
-      - TC-QPS-013
-      - TC-QPS-014
-      - TC-QPS-016
-      - TC-QPS-017
-      - TC-QPS-019
-      - TC-QPS-020
-      - TC-QPS-021
-      - TC-QPS-022
-      - TC-QPS-023
-      - TC-QPS-024
-      - TC-QPS-025
-      - TC-QPS-026
-      - TC-QPS-027
-      - TC-QPS-028
-      - TC-QPS-029
-      - TC-QPS-030
-      - TC-QPS-031
-      - TC-QPS-032
-      - TC-QPS-033
-      - TC-QPS-034
-    knowledge_docs:
-      - knowledge/changelog/2026-11-23_req002_quote_price.md
-      - requirements/docs/REQ-002_quote_price_sync.md
-      - testcases/REQ-002-TC-list.yaml
-    status: active
-
 # ───────────────────────────────────────────────────────
 # 模块-承运商-版本 三维索引（快速查找用）
 # test_path 为空表示该功能暂无自动化脚本，需先在 tests/ 下落库再回填
@@ -204,14 +154,6 @@ module_registry:
         config_path: config/lsp_quote/
         test_path: ""
         test_status: no_automation
-
-      # REQ-002 /quote/price_sync：目标为 SCP 环境真实承运商（AU.TGE.*），非 carrier_a/b 假数据
-      quote_price:
-        current_version: v1.6
-        config_path: config/lsp_quote/price_sync.yaml
-        test_path: tests/api/test_quote_price_sync.py
-        case_list: testcases/REQ-002-TC-list.yaml
-        requirement_id: REQ-002
 
   lsp_booking:
     description: 物流申报/下单

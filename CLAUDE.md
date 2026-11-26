@@ -44,6 +44,7 @@ pytest tests/ui/test_example_home.py::test_home_page_heading  # single test
 pytest --headed                                               # watch the browser
 pytest --browser firefox                                      # chromium (default) | firefox | webkit
 pytest --html=reports/report.html --self-contained-html       # HTML report
+python scripts/export_test_report.py                          # Excel report + write results back to case workbook
 PWDEBUG=1 pytest tests/ui                                     # Playwright inspector (bash syntax)
 ```
 
@@ -58,11 +59,12 @@ Dependency direction is `tests/` → `pages/` or `api_clients/` → `config/`; f
   - `config` — cached YAML configuration.
   - `ui_base_url` / `api_base_url` — read the merged config, falling back to `local_server`.
   - `browser_context_args` — overrides pytest-playwright to inject `base_url` and a fixed viewport into every browser context.
-  - API 层 fixture（`quote_client`、`scp_db` 等）在 `tests/api/` 内定义；`tests/api/conftest.py` 的会话级自检会在被测地址或 Token 缺失时直接失败，避免"全部 skip 仍算通过"。
+  - API 层 fixture 在 `tests/api/conftest.py` 内定义；会话级自检会在被测地址或 Token 缺失时直接失败，避免"全部 skip 仍算通过"。
   - `load_json` — reads payloads from `data/`.
 - `api_clients/base_client.py` — `BaseApiClient` wraps a `requests.Session` with base-URL joining, a default timeout, and `get`/`post` helpers. Service-specific clients subclass it and stay transport-only.
 - `pages/base_page.py` — `BasePage` wraps a Playwright `Page` with navigation and locate/expect helpers. One class per screen.
 - `tests/` — `tests/api` and `tests/ui` mirror the two layers. Tests own all assertions.
+- `scripts/export_test_report.py` — maps `# case_id:` in `tests/**/*.py` to junit results, generates `reports/test-results_*.xlsx`, and writes `实际结果 / 是否通过 / 执行时间` back into the case workbook (auto-discovered under `testcases/` unless `--testcase-xlsx` or `report.excel.testcase_xlsx` is set).
 - `data/` — JSON fixtures loaded through `load_json`.
 - `reports/` — generated output, git-ignored except `.gitkeep`.
 
